@@ -1,5 +1,6 @@
 [![Release](https://github.com/bkincz/clutch/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/bkincz/clutch/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/bkincz/clutch/branch/master/graph/badge.svg)](https://codecov.io/gh/bkincz/clutch)
+[![npm version](https://badge.fury.io/js/@bkincz%2Fclutch.svg)](https://badge.fury.io/js/@bkincz%2Fclutch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 
@@ -24,11 +25,11 @@ Thought I'd put it here for anyone that might want to use it as well.
 ## Installation
 
 ```bash
-npm install clutch
+npm install @bkincz/clutch
 # or
-yarn add clutch
+yarn add @bkincz/clutch
 # or
-pnpm install clutch
+pnpm install @bkincz/clutch
 ```
 
 ## Quick Start
@@ -52,7 +53,7 @@ const initialState: AppState = {
 ### 2. Create Your State Machine
 
 ```typescript
-import { StateMachine } from "clutch";
+import { StateMachine } from "@bkincz/clutch";
 
 class TodoState extends StateMachine<AppState> {
   constructor() {
@@ -84,7 +85,7 @@ export const todoState = new TodoState();
 ### 3. Use in React
 
 ```typescript
-import { useStateMachine } from "clutch";
+import { useStateMachine } from "@bkincz/clutch";
 import { todoState } from "./todoState";
 
 function TodoApp() {
@@ -164,7 +165,7 @@ state.mutate(draft => {
 ### Undo/Redo
 
 ```typescript
-import { useStateActions } from "clutch";
+import { useStateActions } from "@bkincz/clutch";
 
 function UndoRedoButtons() {
   const { undo, redo } = useStateActions(todoState);
