@@ -17,4 +17,7 @@ module.exports = {
 		},
 		include: ['src/**/*.{test,spec}.{ts,tsx}'],
 	},
+	define: {
+		global: 'globalThis',
+	},
 }
