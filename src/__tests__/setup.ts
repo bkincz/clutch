@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import { vi } from 'vitest'
 
 /*
@@ -13,7 +14,7 @@ if (!globalThis.crypto) {
 		// Fallback for older Node.js versions or different environments
 		const crypto = require('crypto')
 		globalThis.crypto = {
-			getRandomValues: (arr: any) => {
+			getRandomValues: (arr: Uint8Array | Uint16Array | Uint32Array) => {
 				const bytes = crypto.randomBytes(arr.length)
 				arr.set(bytes)
 				return arr

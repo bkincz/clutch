@@ -333,7 +333,7 @@ export function useDebouncedStateUpdate<T extends object>(engine: StateMachine<T
 
 	useEffect(() => {
 		return () => {
-			clearTimeout(debouncedMutate as any)
+			clearTimeout(debouncedMutate as unknown as ReturnType<typeof setTimeout>)
 		}
 	}, [debouncedMutate])
 
@@ -351,6 +351,7 @@ export function useStateSubscription<T extends object>(
 	useEffect(() => {
 		const unsubscribe = engine.subscribe(callback)
 		return unsubscribe
+		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [engine, callback, ...deps])
 }
 
@@ -362,8 +363,8 @@ export function useShallowEqual<T>(value: T): T {
 
 	useEffect(() => {
 		if (typeof value === 'object' && value !== null) {
-			const keys1 = Object.keys(state as any)
-			const keys2 = Object.keys(value as any)
+			const keys1 = Object.keys(state as Record<string, unknown>)
+			const keys2 = Object.keys(value as Record<string, unknown>)
 
 			if (keys1.length !== keys2.length) {
 				setState(value)
@@ -371,7 +372,7 @@ export function useShallowEqual<T>(value: T): T {
 			}
 
 			for (const key of keys1) {
-				if ((state as any)[key] !== (value as any)[key]) {
+				if ((state as Record<string, unknown>)[key] !== (value as Record<string, unknown>)[key]) {
 					setState(value)
 					return
 				}

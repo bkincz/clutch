@@ -87,6 +87,7 @@ export interface StateHistoryInfo {
 }
 
 // Compact logger - will be optimized out in production builds
+/* eslint-disable no-console */
 const createLogger = (enabled: boolean) => ({
 	debug: enabled
 		? (msg: string, ...args: unknown[]) => console.debug(`[StateMachine] ${msg}`, ...args)
@@ -101,6 +102,7 @@ const createLogger = (enabled: boolean) => ({
 		? (msg: string, ...args: unknown[]) => console.error(`[StateMachine] ${msg}`, ...args)
 		: () => {},
 })
+/* eslint-enable no-console */
 
 /*
  *   FUNCTIONS
