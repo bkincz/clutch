@@ -1,0 +1,99 @@
+{
+  "name": "clutch",
+  "version": "1.0.0",
+  "description": "A production-ready, TypeScript-first state management library built on Immer with advanced features",
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint src --ext .ts,.tsx",
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\"",
+    "test": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest --coverage",
+    "test:run": "vitest run",
+    "prepublishOnly": "npm run build && npm run type-check && npm run lint && npm run test:run",
+    "clean": "rimraf dist",
+    "size": "size-limit"
+  },
+  "keywords": [
+    "state-management",
+    "immer",
+    "react",
+    "typescript",
+    "undo-redo",
+    "persistence",
+    "immutable",
+    "redux-alternative"
+  ],
+  "author": "Benjamin Kinczel <beni.kinczel@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/bkincz/clutch.git"
+  },
+  "bugs": {
+    "url": "https://github.com/bkincz/clutch/issues"
+  },
+  "homepage": "https://github.com/bkincz/clutch#readme",
+  "peerDependencies": {
+    "immer": ">=9.0.0",
+    "react": ">=16.8.0"
+  },
+  "dependencies": {
+    "immer": ">=9.0.0"
+  },
+  "devDependencies": {
+    "@size-limit/preset-small-lib": "^11.2.0",
+    "@types/jsdom": "^21.1.7",
+    "@types/node": "^20.10.4",
+    "@types/react": "^18.2.45",
+    "@typescript-eslint/eslint-plugin": "^6.13.2",
+    "@typescript-eslint/parser": "^6.13.2",
+    "@vitest/coverage-v8": "^3.2.4",
+    "@vitest/ui": "^3.2.4",
+    "eslint": "^8.55.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-react": "^7.33.2",
+    "eslint-plugin-react-hooks": "^4.6.0",
+    "jsdom": "^26.1.0",
+    "prettier": "^3.1.1",
+    "react": "^18.2.0",
+    "rimraf": "^5.0.5",
+    "size-limit": "^8.2.6",
+    "terser": "^5.43.1",
+    "tsup": "^8.0.1",
+    "typescript": "^5.3.3",
+    "vitest": "^3.2.4"
+  },
+  "size-limit": [
+    {
+      "path": "dist/index.js",
+      "limit": "13 KB"
+    },
+    {
+      "path": "dist/index.mjs",
+      "limit": "13 KB"
+    }
+  ],
+  "engines": {
+    "node": ">=16"
+  }
+}
