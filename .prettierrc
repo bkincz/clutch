@@ -5,7 +5,7 @@
   "endOfLine": "auto",
   "htmlWhitespaceSensitivity": "css",
   "insertPragma": false,
-  "jsxBracketSameLine": false,
+  "bracketSameLine": false,
   "printWidth": 100,
   "proseWrap": "preserve",
   "quoteProps": "as-needed",

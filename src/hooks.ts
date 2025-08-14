@@ -180,7 +180,9 @@ export function useStatePersist<T extends object>(engine: StateMachine<T>) {
 	const hasUnsavedChanges = engine.hasUnsavedChanges()
 
 	const save = useCallback(async () => {
-		if (isSaving) {return false}
+		if (isSaving) {
+			return false
+		}
 
 		setIsSaving(true)
 		setSaveError(null)
@@ -199,7 +201,9 @@ export function useStatePersist<T extends object>(engine: StateMachine<T>) {
 	}, [engine, isSaving])
 
 	const load = useCallback(async () => {
-		if (isLoading) {return false}
+		if (isLoading) {
+			return false
+		}
 
 		setIsLoading(true)
 		setLoadError(null)
@@ -315,10 +319,7 @@ export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
 /**
  * Hook for debounced state updates (useful for search inputs, etc.)
  */
-export function useDebouncedStateUpdate<T extends object>(
-	engine: StateMachine<T>,
-	delay = 300
-) {
+export function useDebouncedStateUpdate<T extends object>(engine: StateMachine<T>, delay = 300) {
 	const [debouncedMutate] = useState(() => {
 		let timeoutId: ReturnType<typeof setTimeout>
 

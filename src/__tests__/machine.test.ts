@@ -26,11 +26,14 @@ class TestStateMachine extends StateMachine<TestState> {
 		}> = {}
 	) {
 		super({
-			initialState: config.initialState !== undefined ? config.initialState : {
-				count: 0,
-				todos: [],
-				user: null,
-			},
+			initialState:
+				config.initialState !== undefined
+					? config.initialState
+					: {
+							count: 0,
+							todos: [],
+							user: null,
+						},
 			enableLogging: config.enableLogging || false,
 			persistenceKey: config.persistenceKey,
 			validateState: config.validateState,
