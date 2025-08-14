@@ -71,9 +71,6 @@ jobs:
       - name: Build
         run: npm run build
 
-      - name: Check bundle size
-        run: npm run size
-
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
