@@ -372,7 +372,10 @@ export function useShallowEqual<T>(value: T): T {
 			}
 
 			for (const key of keys1) {
-				if ((state as Record<string, unknown>)[key] !== (value as Record<string, unknown>)[key]) {
+				if (
+					(state as Record<string, unknown>)[key] !==
+					(value as Record<string, unknown>)[key]
+				) {
 					setState(value)
 					return
 				}
