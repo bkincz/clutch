@@ -1,27 +1,4 @@
-/* eslint-disable no-undef */
 import { vi } from 'vitest'
-
-/*
- *   POLYFILLS
- ***************************************************************************************************/
-// Add crypto.getRandomValues polyfill for Node.js
-if (!globalThis.crypto) {
-	try {
-		// Try modern Node.js crypto
-		const { webcrypto } = require('node:crypto')
-		globalThis.crypto = webcrypto
-	} catch {
-		// Fallback for older Node.js versions or different environments
-		const crypto = require('crypto')
-		globalThis.crypto = {
-			getRandomValues: (arr: Uint8Array | Uint16Array | Uint32Array) => {
-				const bytes = crypto.randomBytes(arr.length)
-				arr.set(bytes)
-				return arr
-			},
-		} as Crypto
-	}
-}
 
 /*
  *   MOCKS
