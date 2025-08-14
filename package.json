@@ -93,6 +93,9 @@
       "limit": "15 KB"
     }
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=20"
   }
