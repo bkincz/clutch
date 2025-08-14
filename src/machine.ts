@@ -87,12 +87,22 @@ export interface StateHistoryInfo {
 }
 
 // Compact logger - will be optimized out in production builds
+/* eslint-disable no-console */
 const createLogger = (enabled: boolean) => ({
-	debug: enabled ? (msg: string, ...args: unknown[]) => console.debug(`[StateMachine] ${msg}`, ...args) : () => {},
-	info: enabled ? (msg: string, ...args: unknown[]) => console.info(`[StateMachine] ${msg}`, ...args) : () => {},
-	warn: enabled ? (msg: string, ...args: unknown[]) => console.warn(`[StateMachine] ${msg}`, ...args) : () => {},
-	error: enabled ? (msg: string, ...args: unknown[]) => console.error(`[StateMachine] ${msg}`, ...args) : () => {},
+	debug: enabled
+		? (msg: string, ...args: unknown[]) => console.debug(`[StateMachine] ${msg}`, ...args)
+		: () => {},
+	info: enabled
+		? (msg: string, ...args: unknown[]) => console.info(`[StateMachine] ${msg}`, ...args)
+		: () => {},
+	warn: enabled
+		? (msg: string, ...args: unknown[]) => console.warn(`[StateMachine] ${msg}`, ...args)
+		: () => {},
+	error: enabled
+		? (msg: string, ...args: unknown[]) => console.error(`[StateMachine] ${msg}`, ...args)
+		: () => {},
 })
+/* eslint-enable no-console */
 
 /*
  *   FUNCTIONS
@@ -107,7 +117,11 @@ function debounce<T extends (...args: unknown[]) => void>(func: T, wait: number)
 
 // Compact utility functions
 const calculateMemoryUsage = (data: unknown): number => {
-	try { return new Blob([JSON.stringify(data)]).size } catch { return 0 }
+	try {
+		return new Blob([JSON.stringify(data)]).size
+	} catch {
+		return 0
+	}
 }
 
 const generateChecksum = (data: unknown): string => {
@@ -118,7 +132,9 @@ const generateChecksum = (data: unknown): string => {
 			hash = ((hash << 5) - hash + str.charCodeAt(i)) & hash
 		}
 		return hash.toString(36)
-	} catch { return '' }
+	} catch {
+		return ''
+	}
 }
 
 /*
@@ -182,7 +198,7 @@ export abstract class StateMachine<T extends object> {
 	 *   PUBLIC
 	 ***************************************************************************************************/
 
-  /*
+	/*
 	 * CORE METHODS
 	 */
 	public getState(): T {
@@ -246,12 +262,12 @@ export abstract class StateMachine<T extends object> {
 			}
 		} catch (error) {
 			this.logger.error('State mutation failed', { description, error })
-			
+
 			// Re-throw validation errors without wrapping them
 			if (error instanceof StateValidationError) {
 				throw error
 			}
-			
+
 			throw new StateMachineError(
 				`State mutation failed: ${
 					error instanceof Error ? error.message : 'Unknown error'
@@ -318,7 +334,7 @@ export abstract class StateMachine<T extends object> {
 		}
 	}
 
-  /*
+	/*
 	 * UNDO/REDO METHODS
 	 */
 	public undo(): boolean {
@@ -393,7 +409,7 @@ export abstract class StateMachine<T extends object> {
 		return this.historyIndex < this.history.length - 1
 	}
 
-  /*
+	/*
 	 * HISTORY METHODS
 	 */
 	public getHistoryInfo(): StateHistoryInfo {
@@ -417,7 +433,7 @@ export abstract class StateMachine<T extends object> {
 		this.logger.info('History cleared', { previousLength: oldLength })
 	}
 
-  /*
+	/*
 	 * SAVE/LOAD METHODS
 	 */
 	public async forceSave(): Promise<void> {
@@ -492,7 +508,9 @@ export abstract class StateMachine<T extends object> {
 	 * CLEANUP METHODS
 	 */
 	public destroy(): void {
-		if (this.isDestroyed) {return}
+		if (this.isDestroyed) {
+			return
+		}
 
 		this.logger.info('Destroying StateMachine')
 
@@ -530,7 +548,7 @@ export abstract class StateMachine<T extends object> {
 	 *   PRIVATE METHODS
 	 ***************************************************************************************************/
 
-  /*
+	/*
 	 * STATE VALIDATION
 	 */
 	private assertNotDestroyed(): void {
@@ -540,7 +558,11 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private validateConfig(config: StateConfig<T>): void {
-		if (!config.initialState || typeof config.initialState !== 'object' || config.initialState === null) {
+		if (
+			!config.initialState ||
+			typeof config.initialState !== 'object' ||
+			config.initialState === null
+		) {
 			throw new StateValidationError('Initial state must be an object')
 		}
 
@@ -564,7 +586,9 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private notifyListeners(): void {
-		if (this.listeners.size === 0) {return}
+		if (this.listeners.size === 0) {
+			return
+		}
 
 		const frozenState = this.state
 		let errorCount = 0
@@ -583,7 +607,7 @@ export abstract class StateMachine<T extends object> {
 		}
 	}
 
-  /*
+	/*
 	 * HISTORY
 	 */
 	private saveToHistory(patches: Patch[], inversePatches: Patch[], description?: string): void {
@@ -596,11 +620,11 @@ export abstract class StateMachine<T extends object> {
 			inversePatches,
 			timestamp: Date.now(),
 		}
-		
+
 		if (description) {
 			snapshot.description = description
 		}
-		
+
 		this.history.push(snapshot)
 
 		this.historyIndex++
@@ -618,7 +642,9 @@ export abstract class StateMachine<T extends object> {
 	 * PERSISTENCE
 	 */
 	private persistToLocal(): void {
-		if (!this.config.enablePersistence || !this.config.persistenceKey) {return}
+		if (!this.config.enablePersistence || !this.config.persistenceKey) {
+			return
+		}
 
 		try {
 			const persistedState: PersistedState<T> = {
@@ -641,7 +667,9 @@ export abstract class StateMachine<T extends object> {
 
 		try {
 			const stored = localStorage.getItem(this.config.persistenceKey)
-			if (!stored) {return null}
+			if (!stored) {
+				return null
+			}
 
 			const persistedState: PersistedState<T> = JSON.parse(stored)
 
@@ -670,7 +698,9 @@ export abstract class StateMachine<T extends object> {
 	 * AUTO SAVE
 	 */
 	private startAutoSave(): void {
-		if (!this.config.enableAutoSave) {return}
+		if (!this.config.enableAutoSave) {
+			return
+		}
 
 		const interval = this.config.autoSaveInterval * 60 * 1000
 

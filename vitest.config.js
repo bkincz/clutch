@@ -1,6 +1,4 @@
-import { defineConfig } from 'vitest/config'
-
-export default defineConfig({
+module.exports = {
 	test: {
 		globals: true,
 		environment: 'jsdom',
@@ -12,17 +10,14 @@ export default defineConfig({
 				'node_modules/',
 				'dist/',
 				'**/*.d.ts',
-				'**/*.config.ts',
-				'**/*.test.ts',
-				'**/*.test.tsx',
+				'**/*.config.*',
+				'**/*.test.*',
 				'**/setup.ts',
 			],
 		},
 		include: ['src/**/*.{test,spec}.{ts,tsx}'],
 	},
-	resolve: {
-		alias: {
-			'@': '/src',
-		},
+	define: {
+		global: 'globalThis',
 	},
-})
+}

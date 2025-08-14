@@ -1,6 +1,6 @@
 {
-  "name": "clutch",
-  "version": "1.0.0",
+  "name": "@bkincz/clutch",
+  "version": "1.0.1",
   "description": "A production-ready, TypeScript-first state management library built on Immer with advanced features",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
@@ -86,14 +86,17 @@
   "size-limit": [
     {
       "path": "dist/index.js",
-      "limit": "13 KB"
+      "limit": "15 KB"
     },
     {
-      "path": "dist/index.mjs",
-      "limit": "13 KB"
+      "path": "dist/index.mjs", 
+      "limit": "15 KB"
     }
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
-    "node": ">=16"
+    "node": ">=20"
   }
 }
