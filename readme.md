@@ -1,5 +1,5 @@
 [![Release](https://github.com/bkincz/clutch/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/bkincz/clutch/actions/workflows/release.yml)
-[![codecov](https://codecov.io/gh/bkincz/clutch/branch/master/graph/badge.svg)](https://codecov.io/gh/bkincz/clutch)
+[![codecov](https://codecov.io/gh/bkincz/clutch/branch/main/graph/badge.svg)](https://codecov.io/gh/bkincz/clutch)
 [![npm version](https://badge.fury.io/js/@bkincz%2Fclutch.svg)](https://badge.fury.io/js/@bkincz%2Fclutch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
