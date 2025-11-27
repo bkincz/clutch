@@ -13,14 +13,14 @@ Thought I'd put it here for anyone that might want to use it as well.
 
 ## Features
 
-- 🔄 **Immutable Updates** - Powered by Immer for clean, mutable-style code that produces immutable state
-- ⏪ **Undo/Redo** - Built-in history management using efficient patch-based storage
-- 💾 **Persistence** - Automatic localStorage backup with optional server synchronization
-- 🚀 **Performance** - Debounced notifications, memory tracking, and efficient batch operations
-- 🛡️ **Type Safety** - Full TypeScript support with runtime validation
-- 🔍 **Debugging** - Comprehensive logging system with structured output
-- 🧹 **Memory Management** - Automatic cleanup and configurable history limits
-- ⚡ **Auto-Save** - Configurable automatic persistence to prevent data loss
+- **Immutable Updates** - Powered by Immer for clean, mutable-style code that produces immutable state
+- **Undo/Redo** - Built-in history management using efficient patch-based storage
+- **Persistence** - Automatic localStorage backup with optional server synchronization
+- **Performance** - Debounced notifications, memory tracking, and efficient batch operations
+- **Type Safety** - Full TypeScript support with runtime validation
+- **Debugging** - Comprehensive logging system with structured output
+- **Memory Management** - Automatic cleanup and configurable history limits
+- **Auto-Save** - Configurable automatic persistence to prevent data loss
 
 ## Installation
 
@@ -181,7 +181,7 @@ function UndoRedoButtons() {
 
 ### Batch Operations
 
-Group multiple changes into a single undo operation:
+Group multiple changes into a single operation:
 
 ```typescript
 state.batch([
