@@ -22,6 +22,7 @@
 		"exactOptionalPropertyTypes": true,
 		"allowUnusedLabels": false,
 		"allowUnreachableCode": false,
+		"noUnusedParameters": false,
 		"noPropertyAccessFromIndexSignature": false,
 		"esModuleInterop": true,
 		"allowSyntheticDefaultImports": true,

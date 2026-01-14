@@ -190,9 +190,10 @@ export abstract class StateMachine<T extends object> {
 		})
 	}
 
-	// TODO: Remove this and separate it from class in the future
-	protected abstract saveToServer(state: T): Promise<void>
-	protected abstract loadFromServer(): Promise<T | null>
+	protected async saveToServer(_state: T): Promise<void> {}
+	protected async loadFromServer(): Promise<T | null> {
+		return null
+	}
 
 	/*
 	 *   PUBLIC
