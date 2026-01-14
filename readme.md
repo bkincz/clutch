@@ -65,7 +65,7 @@ class TodoState extends StateMachine<AppState> {
     });
   }
 
-  // Optional: implement server persistence
+  // Optional: Override these methods only if you need server persistence
   protected async saveToServer(state: AppState): Promise<void> {
     await fetch("/api/state", {
       method: "POST",

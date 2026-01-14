@@ -39,14 +39,6 @@ class TestStateMachine extends StateMachine<TestState> {
 			validateState: config.validateState,
 		})
 	}
-
-	protected async saveToServer(): Promise<void> {
-		// No-op for tests
-	}
-
-	protected async loadFromServer(): Promise<TestState | null> {
-		return null
-	}
 }
 
 /*
