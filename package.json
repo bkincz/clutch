@@ -89,7 +89,7 @@
       "limit": "15 KB"
     },
     {
-      "path": "dist/index.mjs", 
+      "path": "dist/index.mjs",
       "limit": "15 KB"
     }
   ],
