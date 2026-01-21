@@ -185,8 +185,10 @@ export abstract class StateMachine<T extends object> {
 	protected isDestroyed = false
 	protected logger: ReturnType<typeof createLogger>
 	protected debouncedNotify: () => void
-	protected eventListeners: Map<LifecycleEvent, Set<LifecycleListener<T, LifecycleEvent>>> | null =
-		null
+	protected eventListeners: Map<
+		LifecycleEvent,
+		Set<LifecycleListener<T, LifecycleEvent>>
+	> | null = null
 
 	constructor(config: StateConfig<T>) {
 		this.validateConfig(config)
@@ -529,10 +531,7 @@ export abstract class StateMachine<T extends object> {
 	/*
 	 * LIFECYCLE EVENT METHODS
 	 */
-	public on<E extends LifecycleEvent>(
-		event: E,
-		listener: LifecycleListener<T, E>
-	): () => void {
+	public on<E extends LifecycleEvent>(event: E, listener: LifecycleListener<T, E>): () => void {
 		this.assertNotDestroyed()
 
 		if (!this.eventListeners) {

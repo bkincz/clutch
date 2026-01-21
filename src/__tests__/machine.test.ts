@@ -21,6 +21,16 @@ interface TestState {
 }
 
 /*
+ *   TEST HELPERS
+ ***************************************************************************************************/
+function defined<T>(value: T | null | undefined, message?: string): T {
+	expect(value, message).toBeDefined()
+	expect(value, message).not.toBeNull()
+	// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
+	return value!
+}
+
+/*
  *   TEST CLASS
  ***************************************************************************************************/
 class TestStateMachine extends StateMachine<TestState> {
@@ -446,16 +456,19 @@ describe('StateMachine', () => {
 
 		describe('afterMutate event', () => {
 			it('should emit afterMutate with correct payload on mutate()', () => {
-				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
-				stateMachine.on('afterMutate', listener)
+				let capturedPayload: AfterMutatePayload<TestState> | null = null
+				stateMachine.on('afterMutate', payload => {
+					capturedPayload = payload
+				})
 
 				stateMachine.mutate(draft => {
 					draft.count = 5
 				}, 'Increment count')
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<AfterMutatePayload<TestState>>(
+					capturedPayload,
+					'Expected afterMutate to be emitted'
+				)
 				expect(payload.state.count).toBe(5)
 				expect(payload.operation).toBe('mutate')
 				expect(payload.description).toBe('Increment count')
@@ -464,8 +477,10 @@ describe('StateMachine', () => {
 			})
 
 			it('should emit afterMutate with correct payload on batch()', () => {
-				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
-				stateMachine.on('afterMutate', listener)
+				let capturedPayload: AfterMutatePayload<TestState> | null = null
+				stateMachine.on('afterMutate', payload => {
+					capturedPayload = payload
+				})
 
 				stateMachine.batch(
 					[
@@ -479,9 +494,10 @@ describe('StateMachine', () => {
 					'Batch update'
 				)
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<AfterMutatePayload<TestState>>(
+					capturedPayload,
+					'Expected afterMutate to be emitted'
+				)
 				expect(payload.state.count).toBe(5)
 				expect(payload.state.user?.name).toBe('Alice')
 				expect(payload.operation).toBe('batch')
@@ -493,14 +509,17 @@ describe('StateMachine', () => {
 					draft.count = 5
 				}, 'Increment')
 
-				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
-				stateMachine.on('afterMutate', listener)
+				let capturedPayload: AfterMutatePayload<TestState> | null = null
+				stateMachine.on('afterMutate', payload => {
+					capturedPayload = payload
+				})
 
 				stateMachine.undo()
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<AfterMutatePayload<TestState>>(
+					capturedPayload,
+					'Expected afterMutate to be emitted'
+				)
 				expect(payload.state.count).toBe(0)
 				expect(payload.operation).toBe('undo')
 				expect(payload.description).toBe('Increment')
@@ -513,28 +532,33 @@ describe('StateMachine', () => {
 
 				stateMachine.undo()
 
-				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
-				stateMachine.on('afterMutate', listener)
+				let capturedPayload: AfterMutatePayload<TestState> | null = null
+				stateMachine.on('afterMutate', payload => {
+					capturedPayload = payload
+				})
 
 				stateMachine.redo()
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<AfterMutatePayload<TestState>>(
+					capturedPayload,
+					'Expected afterMutate to be emitted'
+				)
 				expect(payload.state.count).toBe(5)
 				expect(payload.operation).toBe('redo')
 				expect(payload.description).toBe('Increment')
 			})
 
 			it('should not emit afterMutate when mutation produces no changes', () => {
-				const listener = vi.fn()
-				stateMachine.on('afterMutate', listener)
+				let called = false
+				stateMachine.on('afterMutate', () => {
+					called = true
+				})
 
 				stateMachine.mutate(() => {
 					// No changes
 				})
 
-				expect(listener).not.toHaveBeenCalled()
+				expect(called).toBe(false)
 			})
 		})
 
@@ -553,8 +577,10 @@ describe('StateMachine', () => {
 				}
 
 				const machine = new ValidatingMachine()
-				const listener = vi.fn<[ErrorPayload], void>()
-				machine.on('error', listener)
+				let capturedPayload: ErrorPayload | null = null
+				machine.on('error', payload => {
+					capturedPayload = payload
+				})
 
 				expect(() => {
 					machine.mutate(draft => {
@@ -562,16 +588,19 @@ describe('StateMachine', () => {
 					})
 				}).toThrow()
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<ErrorPayload>(
+					capturedPayload,
+					'Expected error to be emitted'
+				)
 				expect(payload.operation).toBe('mutate')
 				expect(payload.error).toBeInstanceOf(Error)
 			})
 
 			it('should emit error event on batch failure', () => {
-				const listener = vi.fn<[ErrorPayload], void>()
-				stateMachine.on('error', listener)
+				let capturedPayload: ErrorPayload | null = null
+				stateMachine.on('error', payload => {
+					capturedPayload = payload
+				})
 
 				expect(() => {
 					stateMachine.batch([
@@ -579,8 +608,11 @@ describe('StateMachine', () => {
 					])
 				}).toThrow()
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				expect(listener.mock.calls[0][0].operation).toBe('batch')
+				const payload = defined<ErrorPayload>(
+					capturedPayload,
+					'Expected error to be emitted'
+				)
+				expect(payload.operation).toBe('batch')
 			})
 		})
 
@@ -591,14 +623,17 @@ describe('StateMachine', () => {
 					draft.user = { name: 'Final User' }
 				})
 
-				const listener = vi.fn<[DestroyPayload<TestState>], void>()
-				stateMachine.on('destroy', listener)
+				let capturedPayload: DestroyPayload<TestState> | null = null
+				stateMachine.on('destroy', payload => {
+					capturedPayload = payload
+				})
 
 				stateMachine.destroy()
 
-				expect(listener).toHaveBeenCalledTimes(1)
-				const payload = listener.mock.calls[0][0]
-
+				const payload = defined<DestroyPayload<TestState>>(
+					capturedPayload,
+					'Expected destroy to be emitted'
+				)
 				expect(payload.finalState.count).toBe(42)
 				expect(payload.finalState.user?.name).toBe('Final User')
 			})
@@ -627,7 +662,9 @@ describe('StateMachine', () => {
 				stateMachine.redo()
 
 				// Access protected property for testing (this is a white-box test)
-				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+				const machine = stateMachine as unknown as {
+					eventListeners: Map<string, Set<unknown>> | null
+				}
 				expect(machine.eventListeners).toBeNull()
 
 				// Now add a listener
@@ -637,7 +674,9 @@ describe('StateMachine', () => {
 			})
 
 			it('should clean up eventListeners map when all listeners are removed', () => {
-				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+				const machine = stateMachine as unknown as {
+					eventListeners: Map<string, Set<unknown>> | null
+				}
 
 				// Add listeners
 				const unsub1 = stateMachine.on('afterMutate', vi.fn())
@@ -656,7 +695,9 @@ describe('StateMachine', () => {
 			})
 
 			it('should handle multiple listeners for the same event during cleanup', () => {
-				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+				const machine = stateMachine as unknown as {
+					eventListeners: Map<string, Set<unknown>> | null
+				}
 
 				const unsub1 = stateMachine.on('afterMutate', vi.fn())
 				const unsub2 = stateMachine.on('afterMutate', vi.fn())
