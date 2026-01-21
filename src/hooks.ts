@@ -1,8 +1,13 @@
 /*
  *   IMPORTS
  ***************************************************************************************************/
-import { type DependencyList, useEffect, useState, useCallback } from 'react'
-import { StateMachine, type StateHistoryInfo } from './machine'
+import { type DependencyList, useEffect, useState, useCallback, useRef } from 'react'
+import {
+	StateMachine,
+	type StateHistoryInfo,
+	type LifecycleEvent,
+	type LifecyclePayloadMap,
+} from './machine'
 
 /*
  *   TYPES
@@ -356,6 +361,22 @@ export function useStateSubscription<T extends object>(
 }
 
 /**
+ * Hook for subscribing to lifecycle events (afterMutate, error, destroy)
+ */
+export function useLifecycleEvent<T extends object, E extends LifecycleEvent>(
+	engine: StateMachine<T>,
+	event: E,
+	listener: (payload: LifecyclePayloadMap<T>[E]) => void
+) {
+	const listenerRef = useRef(listener)
+	listenerRef.current = listener
+
+	useEffect(() => {
+		return engine.on(event, payload => listenerRef.current(payload))
+	}, [engine, event])
+}
+
+/**
  * Utility hook for shallow equality comparison
  */
 export function useShallowEqual<T>(value: T): T {
@@ -406,5 +427,9 @@ export function createStateMachineHooks<T extends object>(engine: StateMachine<T
 		useDebounced: (delay?: number) => useDebouncedStateUpdate(engine, delay),
 		useSubscription: (callback: (state: T) => void, deps?: DependencyList) =>
 			useStateSubscription(engine, callback, deps),
+		useLifecycle: <E extends LifecycleEvent>(
+			event: E,
+			listener: (payload: LifecyclePayloadMap<T>[E]) => void
+		) => useLifecycleEvent(engine, event, listener),
 	}
 }

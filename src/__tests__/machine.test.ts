@@ -2,7 +2,14 @@
  *   IMPORTS
  ***************************************************************************************************/
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { StateMachine, StateMachineError, StateValidationError } from '../machine'
+import {
+	StateMachine,
+	StateMachineError,
+	StateValidationError,
+	type AfterMutatePayload,
+	type ErrorPayload,
+	type DestroyPayload,
+} from '../machine'
 
 /*
  *   TYPES
@@ -372,6 +379,297 @@ describe('StateMachine', () => {
 					draft.count = -1
 				})
 			}).toThrow(StateValidationError)
+		})
+	})
+
+	describe('lifecycle events', () => {
+		describe('on() method', () => {
+			it('should register and unregister event listeners', () => {
+				const listener = vi.fn()
+				const unsubscribe = stateMachine.on('afterMutate', listener)
+
+				stateMachine.mutate(draft => {
+					draft.count = 1
+				})
+
+				expect(listener).toHaveBeenCalledTimes(1)
+
+				unsubscribe()
+
+				stateMachine.mutate(draft => {
+					draft.count = 2
+				})
+
+				expect(listener).toHaveBeenCalledTimes(1)
+			})
+
+			it('should throw error when registering on destroyed machine', () => {
+				stateMachine.destroy()
+
+				expect(() => {
+					stateMachine.on('afterMutate', vi.fn())
+				}).toThrow(StateMachineError)
+			})
+
+			it('should support multiple listeners for same event', () => {
+				const listener1 = vi.fn()
+				const listener2 = vi.fn()
+
+				stateMachine.on('afterMutate', listener1)
+				stateMachine.on('afterMutate', listener2)
+
+				stateMachine.mutate(draft => {
+					draft.count = 1
+				})
+
+				expect(listener1).toHaveBeenCalledTimes(1)
+				expect(listener2).toHaveBeenCalledTimes(1)
+			})
+
+			it('should handle listener errors gracefully without affecting other listeners', () => {
+				const errorListener = vi.fn().mockImplementation(() => {
+					throw new Error('Listener error')
+				})
+				const normalListener = vi.fn()
+
+				stateMachine.on('afterMutate', errorListener)
+				stateMachine.on('afterMutate', normalListener)
+
+				stateMachine.mutate(draft => {
+					draft.count = 1
+				})
+
+				expect(errorListener).toHaveBeenCalled()
+				expect(normalListener).toHaveBeenCalled()
+			})
+		})
+
+		describe('afterMutate event', () => {
+			it('should emit afterMutate with correct payload on mutate()', () => {
+				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
+				stateMachine.on('afterMutate', listener)
+
+				stateMachine.mutate(draft => {
+					draft.count = 5
+				}, 'Increment count')
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.state.count).toBe(5)
+				expect(payload.operation).toBe('mutate')
+				expect(payload.description).toBe('Increment count')
+				expect(payload.patches.length).toBeGreaterThan(0)
+				expect(payload.inversePatches.length).toBeGreaterThan(0)
+			})
+
+			it('should emit afterMutate with correct payload on batch()', () => {
+				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
+				stateMachine.on('afterMutate', listener)
+
+				stateMachine.batch(
+					[
+						draft => {
+							draft.count = 5
+						},
+						draft => {
+							draft.user = { name: 'Alice' }
+						},
+					],
+					'Batch update'
+				)
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.state.count).toBe(5)
+				expect(payload.state.user?.name).toBe('Alice')
+				expect(payload.operation).toBe('batch')
+				expect(payload.description).toBe('Batch update')
+			})
+
+			it('should emit afterMutate with correct payload on undo()', () => {
+				stateMachine.mutate(draft => {
+					draft.count = 5
+				}, 'Increment')
+
+				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
+				stateMachine.on('afterMutate', listener)
+
+				stateMachine.undo()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.state.count).toBe(0)
+				expect(payload.operation).toBe('undo')
+				expect(payload.description).toBe('Increment')
+			})
+
+			it('should emit afterMutate with correct payload on redo()', () => {
+				stateMachine.mutate(draft => {
+					draft.count = 5
+				}, 'Increment')
+
+				stateMachine.undo()
+
+				const listener = vi.fn<[AfterMutatePayload<TestState>], void>()
+				stateMachine.on('afterMutate', listener)
+
+				stateMachine.redo()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.state.count).toBe(5)
+				expect(payload.operation).toBe('redo')
+				expect(payload.description).toBe('Increment')
+			})
+
+			it('should not emit afterMutate when mutation produces no changes', () => {
+				const listener = vi.fn()
+				stateMachine.on('afterMutate', listener)
+
+				stateMachine.mutate(() => {
+					// No changes
+				})
+
+				expect(listener).not.toHaveBeenCalled()
+			})
+		})
+
+		describe('error event', () => {
+			it('should emit error event on mutate failure', () => {
+				class ValidatingMachine extends TestStateMachine {
+					constructor() {
+						super({ initialState: { count: 0, todos: [], user: null } })
+					}
+
+					protected validateState(state: TestState): void {
+						if (state.count < 0) {
+							throw new StateValidationError('Count cannot be negative')
+						}
+					}
+				}
+
+				const machine = new ValidatingMachine()
+				const listener = vi.fn<[ErrorPayload], void>()
+				machine.on('error', listener)
+
+				expect(() => {
+					machine.mutate(draft => {
+						draft.count = -1
+					})
+				}).toThrow()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.operation).toBe('mutate')
+				expect(payload.error).toBeInstanceOf(Error)
+			})
+
+			it('should emit error event on batch failure', () => {
+				const listener = vi.fn<[ErrorPayload], void>()
+				stateMachine.on('error', listener)
+
+				expect(() => {
+					stateMachine.batch([
+						'not a function' as any, // Invalid mutation
+					])
+				}).toThrow()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				expect(listener.mock.calls[0][0].operation).toBe('batch')
+			})
+		})
+
+		describe('destroy event', () => {
+			it('should emit destroy event with final state before cleanup', () => {
+				stateMachine.mutate(draft => {
+					draft.count = 42
+					draft.user = { name: 'Final User' }
+				})
+
+				const listener = vi.fn<[DestroyPayload<TestState>], void>()
+				stateMachine.on('destroy', listener)
+
+				stateMachine.destroy()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+				const payload = listener.mock.calls[0][0]
+
+				expect(payload.finalState.count).toBe(42)
+				expect(payload.finalState.user?.name).toBe('Final User')
+			})
+
+			it('should not emit destroy event on subsequent destroy calls', () => {
+				const listener = vi.fn()
+				stateMachine.on('destroy', listener)
+
+				stateMachine.destroy()
+				stateMachine.destroy()
+
+				expect(listener).toHaveBeenCalledTimes(1)
+			})
+		})
+
+		describe('zero-cost when unused', () => {
+			it('should not create eventListeners map until first listener is added', () => {
+				// Perform mutations without any lifecycle listeners
+				stateMachine.mutate(draft => {
+					draft.count = 1
+				})
+				stateMachine.mutate(draft => {
+					draft.count = 2
+				})
+				stateMachine.undo()
+				stateMachine.redo()
+
+				// Access protected property for testing (this is a white-box test)
+				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+				expect(machine.eventListeners).toBeNull()
+
+				// Now add a listener
+				stateMachine.on('afterMutate', vi.fn())
+
+				expect(machine.eventListeners).not.toBeNull()
+			})
+
+			it('should clean up eventListeners map when all listeners are removed', () => {
+				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+
+				// Add listeners
+				const unsub1 = stateMachine.on('afterMutate', vi.fn())
+				const unsub2 = stateMachine.on('error', vi.fn())
+
+				expect(machine.eventListeners).not.toBeNull()
+				expect(machine.eventListeners?.size).toBe(2)
+
+				// Remove one listener type completely
+				unsub1()
+				expect(machine.eventListeners?.size).toBe(1)
+
+				// Remove the last listener
+				unsub2()
+				expect(machine.eventListeners).toBeNull()
+			})
+
+			it('should handle multiple listeners for the same event during cleanup', () => {
+				const machine = stateMachine as unknown as { eventListeners: Map<string, Set<unknown>> | null }
+
+				const unsub1 = stateMachine.on('afterMutate', vi.fn())
+				const unsub2 = stateMachine.on('afterMutate', vi.fn())
+
+				expect(machine.eventListeners?.get('afterMutate')?.size).toBe(2)
+
+				unsub1()
+				expect(machine.eventListeners?.get('afterMutate')?.size).toBe(1)
+				expect(machine.eventListeners).not.toBeNull()
+
+				unsub2()
+				expect(machine.eventListeners).toBeNull()
+			})
 		})
 	})
 })
