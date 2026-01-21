@@ -2,6 +2,8 @@
  *   IMPORTS
  ***************************************************************************************************/
 import { produce, enablePatches, applyPatches, type Patch, type Draft } from 'immer'
+import { DevToolsConnector, type DevToolsConfig } from './devtools'
+import { StateSyncManager, type SyncConfig } from './sync'
 
 enablePatches()
 
@@ -41,6 +43,27 @@ export class StatePersistenceError extends StateMachineError {
 /*
  *   TYPES
  ***************************************************************************************************/
+export type MiddlewareContext<T> = {
+	state: T
+	description: string | undefined
+	operation: MutationOperation
+	timestamp: number
+}
+
+export type MiddlewareNext<T> = (draft: Draft<T>) => void
+
+export type Middleware<T> = (
+	context: MiddlewareContext<T>,
+	next: MiddlewareNext<T>,
+	draft: Draft<T>
+) => void | Promise<void>
+
+export type PersistenceFilter<T> = {
+	exclude?: (keyof T)[]
+	include?: (keyof T)[]
+	custom?: (state: T) => Partial<T>
+}
+
 export interface StateConfig<T extends object> {
 	initialState: T
 	persistenceKey?: string
@@ -50,6 +73,10 @@ export interface StateConfig<T extends object> {
 	enableAutoSave?: boolean
 	enableLogging?: boolean
 	validateState?: (state: T) => boolean
+	middleware?: Middleware<T>[]
+	persistenceFilter?: PersistenceFilter<T>
+	enableDevTools?: boolean | DevToolsConfig
+	enableSync?: boolean | SyncConfig
 }
 
 interface InternalStateConfig<T extends object> {
@@ -61,6 +88,8 @@ interface InternalStateConfig<T extends object> {
 	enableAutoSave: boolean
 	enableLogging: boolean
 	validateState: (state: T) => boolean
+	middleware: Middleware<T>[]
+	persistenceFilter: PersistenceFilter<T> | null
 }
 
 export interface StateSnapshot {
@@ -189,6 +218,8 @@ export abstract class StateMachine<T extends object> {
 		LifecycleEvent,
 		Set<LifecycleListener<T, LifecycleEvent>>
 	> | null = null
+	protected devtools: DevToolsConnector<T> | null = null
+	protected syncManager: StateSyncManager<T> | null = null
 
 	constructor(config: StateConfig<T>) {
 		this.validateConfig(config)
@@ -202,6 +233,8 @@ export abstract class StateMachine<T extends object> {
 			enableAutoSave: config.enableAutoSave ?? true,
 			enableLogging: config.enableLogging ?? false,
 			validateState: config.validateState ?? (() => true),
+			middleware: config.middleware ?? [],
+			persistenceFilter: config.persistenceFilter ?? null,
 		}
 
 		this.logger = createLogger(this.config.enableLogging)
@@ -220,6 +253,16 @@ export abstract class StateMachine<T extends object> {
 
 		if (this.config.enableAutoSave) {
 			this.startAutoSave()
+		}
+
+		// Initialize DevTools if enabled
+		if (config.enableDevTools) {
+			this.initializeDevTools(config.enableDevTools)
+		}
+
+		// Initialize Sync if enabled
+		if (config.enableSync) {
+			this.initializeSync(config.enableSync)
 		}
 
 		this.logger.info('StateMachine initialized', {
@@ -281,10 +324,13 @@ export abstract class StateMachine<T extends object> {
 		}
 
 		try {
+			// Execute middleware chain
+			const finalRecipe = this.composeMiddleware(recipe, description, 'mutate')
+
 			let patches: Patch[] = []
 			let inversePatches: Patch[] = []
 
-			const nextState = produce(this.state, recipe, (p, ip) => {
+			const nextState = produce(this.state, finalRecipe, (p, ip) => {
 				patches = p
 				inversePatches = ip
 			})
@@ -301,6 +347,21 @@ export abstract class StateMachine<T extends object> {
 					description,
 					operation: 'mutate',
 				})
+
+				// Send to DevTools
+				if (this.devtools) {
+					this.devtools.send(description || 'State Mutated', nextState, patches)
+				}
+
+				// Broadcast to other tabs
+				if (this.syncManager) {
+					this.syncManager.broadcastChange(
+						nextState,
+						patches,
+						inversePatches,
+						description
+					)
+				}
 
 				this.logger.debug('State mutated', {
 					description,
@@ -351,10 +412,13 @@ export abstract class StateMachine<T extends object> {
 					throw new StateValidationError(`Mutation at index ${index} must be a function`)
 				}
 
+				// Execute middleware chain for each mutation in batch
+				const finalRecipe = this.composeMiddleware(recipe, description, 'batch')
+
 				let patches: Patch[] = []
 				let inversePatches: Patch[] = []
 
-				const nextState = produce(currentState, recipe, (p, ip) => {
+				const nextState = produce(currentState, finalRecipe, (p, ip) => {
 					patches = p
 					inversePatches = ip
 				})
@@ -377,6 +441,21 @@ export abstract class StateMachine<T extends object> {
 					description,
 					operation: 'batch',
 				})
+
+				// Send to DevTools
+				if (this.devtools) {
+					this.devtools.send(description || 'Batch Operation', finalState, allPatches)
+				}
+
+				// Broadcast to other tabs
+				if (this.syncManager) {
+					this.syncManager.broadcastChange(
+						finalState,
+						allPatches,
+						allInversePatches,
+						description
+					)
+				}
 
 				this.logger.debug('Batch operation completed', {
 					description,
@@ -663,6 +742,18 @@ export abstract class StateMachine<T extends object> {
 			this.autoSaveTimer = null
 		}
 
+		// Disconnect DevTools
+		if (this.devtools) {
+			this.devtools.disconnect()
+			this.devtools = null
+		}
+
+		// Destroy sync manager
+		if (this.syncManager) {
+			this.syncManager.destroy()
+			this.syncManager = null
+		}
+
 		// Clear references to help garbage collection
 		this.history = []
 		this.listeners = new Set()
@@ -796,19 +887,148 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	/*
+	 * MIDDLEWARE
+	 */
+	private composeMiddleware(
+		recipe: (draft: Draft<T>) => void,
+		description: string | undefined,
+		operation: MutationOperation = 'mutate'
+	): (draft: Draft<T>) => void {
+		if (this.config.middleware.length === 0) {
+			return recipe
+		}
+
+		const context: MiddlewareContext<T> = {
+			state: this.state,
+			description: description,
+			operation,
+			timestamp: Date.now(),
+		}
+
+		// Compose middleware chain in reverse order
+		const composed = this.config.middleware.reduceRight((next, middleware) => {
+			return (draft: Draft<T>) => {
+				middleware(context, next, draft)
+			}
+		}, recipe)
+
+		return composed
+	}
+
+	/*
+	 * DEVTOOLS
+	 */
+	private initializeDevTools(config: boolean | DevToolsConfig): void {
+		const devtoolsConfig = typeof config === 'boolean' ? { name: 'StateMachine' } : config
+
+		this.devtools = new DevToolsConnector(
+			devtoolsConfig.name || 'StateMachine',
+			devtoolsConfig,
+			(newState: T) => this.handleDevToolsTimeTravel(newState)
+		)
+
+		this.devtools.init(this.state)
+	}
+
+	private handleDevToolsTimeTravel(newState: T): void {
+		// Time-travel from DevTools
+		try {
+			this.validateState(newState)
+			this.state = newState
+			this.clearHistory()
+			this.notifyListeners()
+			this.logger.debug('DevTools time-travel applied')
+		} catch (error) {
+			this.logger.error('DevTools time-travel failed', error)
+		}
+	}
+
+	/*
+	 * SYNC
+	 */
+	private initializeSync(config: boolean | SyncConfig): void {
+		const syncConfig = typeof config === 'boolean' ? {} : config
+
+		this.syncManager = new StateSyncManager(
+			syncConfig,
+			() => this.state,
+			(newState, patches) => this.handleRemoteStateUpdate(newState, patches)
+		)
+	}
+
+	private handleRemoteStateUpdate(newState: T, patches?: Patch[]): void {
+		// State update from another tab
+		try {
+			if (patches) {
+				// Apply patches approach
+				const patchedState = applyPatches(this.state, patches) as T
+				this.validateState(patchedState)
+				this.state = patchedState
+			} else {
+				// Full state replacement
+				this.validateState(newState)
+				this.state = newState
+			}
+
+			this.notifyListeners()
+			this.persistToLocal()
+
+			this.logger.debug('Applied remote state update')
+		} catch (error) {
+			this.logger.error('Failed to apply remote state update', error)
+		}
+	}
+
+	/*
 	 * PERSISTENCE
 	 */
+	private filterStateForPersistence(state: T): Partial<T> {
+		if (!this.config.persistenceFilter) {
+			return state
+		}
+
+		const filter = this.config.persistenceFilter
+
+		// Custom filter takes precedence
+		if (filter.custom) {
+			return filter.custom(state)
+		}
+
+		// Exclude approach (blacklist)
+		if (filter.exclude) {
+			const filtered = { ...state }
+			filter.exclude.forEach(key => {
+				delete filtered[key]
+			})
+			return filtered
+		}
+
+		// Include approach (whitelist)
+		if (filter.include) {
+			const filtered: Partial<T> = {}
+			filter.include.forEach(key => {
+				filtered[key] = state[key]
+			})
+			return filtered
+		}
+
+		return state
+	}
+
 	private persistToLocal(): void {
 		if (!this.config.enablePersistence || !this.config.persistenceKey) {
 			return
 		}
 
 		try {
-			const persistedState: PersistedState<T> = {
-				state: this.state,
+			// Filter state before persisting
+			const stateToSave = this.filterStateForPersistence(this.state)
+
+			const persistedState: PersistedState<Partial<T>> = {
+				state: stateToSave,
 				timestamp: Date.now(),
 				version: DEFAULT_VERSION,
-				checksum: generateChecksum(this.state),
+				checksum: generateChecksum(stateToSave),
 			}
 
 			localStorage.setItem(this.config.persistenceKey, JSON.stringify(persistedState))
@@ -828,7 +1048,7 @@ export abstract class StateMachine<T extends object> {
 				return null
 			}
 
-			const persistedState: PersistedState<T> = JSON.parse(stored)
+			const persistedState: PersistedState<Partial<T>> = JSON.parse(stored)
 
 			// Validate checksum if present
 			if (persistedState.checksum) {
@@ -839,12 +1059,18 @@ export abstract class StateMachine<T extends object> {
 				}
 			}
 
+			// Merge persisted state with initial state (for filtered fields)
+			const mergedState = {
+				...this.config.initialState,
+				...persistedState.state,
+			} as T
+
 			this.logger.debug('Loaded persisted state', {
 				timestamp: persistedState.timestamp,
 				version: persistedState.version,
 			})
 
-			return persistedState.state
+			return mergedState
 		} catch (error) {
 			this.logger.warn('Failed to load persisted state', error)
 			return null
