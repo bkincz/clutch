@@ -1,4 +1,4 @@
-[![Release](https://github.com/bkincz/clutch/actions/workflows/release.yml/badge.svg?branch=master)](https://github.com/bkincz/clutch/actions/workflows/release.yml)
+[![Release](https://github.com/bkincz/clutch/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/bkincz/clutch/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/bkincz/clutch/branch/main/graph/badge.svg)](https://codecov.io/gh/bkincz/clutch)
 [![npm version](https://badge.fury.io/js/@bkincz%2Fclutch.svg)](https://badge.fury.io/js/@bkincz%2Fclutch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -16,6 +16,7 @@ Thought I'd put it here for anyone that might want to use it as well.
 - **Immutable Updates** - Powered by Immer for clean, mutable-style code that produces immutable state
 - **Undo/Redo** - Built-in history management using efficient patch-based storage
 - **Persistence** - Automatic localStorage backup with optional server synchronization
+- **Lifecycle Events** - Subscribe to state mutations, errors, and cleanup events
 - **Performance** - Debounced notifications, memory tracking, and efficient batch operations
 - **Type Safety** - Full TypeScript support with runtime validation
 - **Debugging** - Comprehensive logging system with structured output
@@ -191,6 +192,42 @@ state.batch([
 ], "Add multiple todos");
 ```
 
+### Lifecycle Events
+
+Subscribe to state machine events for logging, analytics, or side effects:
+
+```typescript
+// Subscribe to state changes
+const unsubscribe = todoState.on('afterMutate', (payload) => {
+  console.log(`[${payload.operation}] ${payload.description}`);
+  console.log('New state:', payload.state);
+  console.log('Patches applied:', payload.patches);
+});
+
+// Subscribe to errors
+todoState.on('error', (payload) => {
+  reportError(payload.error, { operation: payload.operation });
+});
+
+// Subscribe to cleanup
+todoState.on('destroy', (payload) => {
+  console.log('Final state before cleanup:', payload.finalState);
+});
+
+// Unsubscribe when done
+unsubscribe();
+```
+
+**Available Events:**
+
+| Event | Payload | Triggered When |
+|-------|---------|----------------|
+| `afterMutate` | `{ state, patches, inversePatches, description, operation }` | After any successful state change (mutate, batch, undo, redo) |
+| `error` | `{ error, operation }` | When a mutation or persistence operation fails |
+| `destroy` | `{ finalState }` | Before the state machine is cleaned up |
+
+**Zero-cost when unused:** Event listeners are lazily initialized - if you never subscribe to lifecycle events, there's no performance overhead.
+
 ## React Hooks
 
 ### `useStateMachine(engine)`
@@ -224,6 +261,46 @@ Handle save/load operations and persistence state.
 const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(todoState);
 ```
 
+### `useLifecycleEvent(engine, event, listener)`
+Subscribe to lifecycle events with automatic cleanup.
+
+```typescript
+import { useLifecycleEvent } from "@bkincz/clutch";
+
+function StateLogger() {
+  useLifecycleEvent(todoState, 'afterMutate', (payload) => {
+    console.log(`State changed via ${payload.operation}:`, payload.state);
+  });
+
+  useLifecycleEvent(todoState, 'error', (payload) => {
+    console.error(`Error during ${payload.operation}:`, payload.error);
+  });
+
+  return null;
+}
+```
+
+### `createStateMachineHooks(engine)`
+Create pre-bound hooks for a specific state machine instance.
+
+```typescript
+import { createStateMachineHooks } from "@bkincz/clutch";
+
+const todoHooks = createStateMachineHooks(todoState);
+
+// Use without passing engine to each hook
+function TodoComponent() {
+  const { state, mutate } = todoHooks.useState();
+  const { canUndo, undo } = todoHooks.useHistory();
+
+  todoHooks.useLifecycle('afterMutate', (payload) => {
+    console.log('Mutation:', payload.description);
+  });
+
+  return <div>{state.todos.length} todos</div>;
+}
+```
+
 ## Configuration
 
 ```typescript
@@ -251,11 +328,20 @@ interface StateConfig<T> {
 - `redo(): boolean` - Redo next operation
 - `destroy()` - Clean up resources
 
+### Lifecycle Methods
+
+- `on(event, listener): () => void` - Subscribe to lifecycle events, returns unsubscribe function
+
 ### Persistence Methods
 
 - `forceSave(): Promise<void>` - Immediately save state
 - `hasUnsavedChanges(): boolean` - Check for unsaved changes
 - `loadFromServerManually(): Promise<boolean>` - Manual server load
+
+### History Methods
+
+- `getHistoryInfo(): StateHistoryInfo` - Get current history state (canUndo, canRedo, historyLength, etc.)
+- `clearHistory(): void` - Clear all undo/redo history
 
 ## License
 
