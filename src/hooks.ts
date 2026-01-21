@@ -52,30 +52,36 @@ export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 }
 
 /**
- * Hook to subscribe to a specific slice of state with a selector function
+ * Hook to subscribe to a specific slice of state with a selector function.
+ * Uses refs to avoid stale closures and unnecessary re-subscriptions.
  */
 export function useStateSlice<T extends object, TSelected>(
 	engine: StateMachine<T>,
 	selector: (state: T) => TSelected,
-	equalityFn?: (a: TSelected, b: TSelected) => boolean
+	equalityFn: (a: TSelected, b: TSelected) => boolean = Object.is
 ) {
 	const [selectedState, setSelectedState] = useState(() => selector(engine.getState()))
 
+	const selectorRef = useRef(selector)
+	const equalityFnRef = useRef(equalityFn)
+	const selectedStateRef = useRef(selectedState)
+
+	// Update refs on each render to always have latest values
+	selectorRef.current = selector
+	equalityFnRef.current = equalityFn
+	selectedStateRef.current = selectedState
+
 	useEffect(() => {
 		const unsubscribe = engine.subscribe(newState => {
-			const newSelected = selector(newState)
-
-			if (equalityFn) {
-				if (!equalityFn(selectedState, newSelected)) {
-					setSelectedState(newSelected)
-				}
-			} else if (selectedState !== newSelected) {
+			const newSelected = selectorRef.current(newState)
+			if (!equalityFnRef.current(selectedStateRef.current, newSelected)) {
+				selectedStateRef.current = newSelected
 				setSelectedState(newSelected)
 			}
 		})
 
 		return unsubscribe
-	}, [engine, selector, selectedState, equalityFn])
+	}, [engine])
 
 	return selectedState
 }
@@ -454,30 +460,37 @@ export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
 }
 
 /**
- * Hook to subscribe to a specific slice of combined store state
+ * Hook to subscribe to a specific slice of combined store state.
+ * Uses refs to avoid stale closures and unnecessary re-subscriptions.
  */
 export function useRegistrySlice<T extends MachineStates, TSelected>(
 	store: StateRegistry<T>,
 	selector: (state: CombinedState<T>) => TSelected,
-	equalityFn?: (a: TSelected, b: TSelected) => boolean
+	equalityFn: (a: TSelected, b: TSelected) => boolean = Object.is
 ) {
 	const [selectedState, setSelectedState] = useState(() => selector(store.getState()))
 
+	const selectorRef = useRef(selector)
+	const equalityFnRef = useRef(equalityFn)
+	const selectedStateRef = useRef(selectedState)
+
+	// Update refs on each render to always have latest values -
+	// Need to watch this as im unsure if this is the best approach atm...
+	selectorRef.current = selector
+	equalityFnRef.current = equalityFn
+	selectedStateRef.current = selectedState
+
 	useEffect(() => {
 		const unsubscribe = store.subscribe(newState => {
-			const newSelected = selector(newState)
-
-			if (equalityFn) {
-				if (!equalityFn(selectedState, newSelected)) {
-					setSelectedState(newSelected)
-				}
-			} else if (selectedState !== newSelected) {
+			const newSelected = selectorRef.current(newState)
+			if (!equalityFnRef.current(selectedStateRef.current, newSelected)) {
+				selectedStateRef.current = newSelected
 				setSelectedState(newSelected)
 			}
 		})
 
 		return unsubscribe
-	}, [store, selector, selectedState, equalityFn])
+	}, [store])
 
 	return selectedState
 }

@@ -159,37 +159,43 @@ describe('StateRegistry', () => {
 
 			store.subscribe(listener)
 
-			// Should be called immediately with current state
-			expect(listener).toHaveBeenCalledTimes(1)
-			expect(listener).toHaveBeenCalledWith({
-				user: { name: 'John', email: 'john@example.com' },
-			})
+			// Should NOT be called immediately (no initial call for performance)
+			expect(listener).toHaveBeenCalledTimes(0)
 
-			// Should be called when machine state changes (after debounce)
 			userMachine.mutate(draft => {
 				draft.name = 'Jane'
 			})
 
 			await waitForNotification()
 
-			expect(listener).toHaveBeenCalledTimes(2)
+			expect(listener).toHaveBeenCalledTimes(1)
 			expect(listener).toHaveBeenLastCalledWith({
 				user: { name: 'Jane', email: 'john@example.com' },
 			})
 		})
 
-		it('should unsubscribe from combined state changes', () => {
+		it('should unsubscribe from combined state changes', async () => {
 			store.register('user', userMachine)
 			const listener = vi.fn()
 
 			const unsubscribe = store.subscribe(listener)
+			expect(listener).toHaveBeenCalledTimes(0)
+
+			// Trigger a mutation to verify subscription works
+			userMachine.mutate(draft => {
+				draft.name = 'Jane'
+			})
+
+			await waitForNotification()
 			expect(listener).toHaveBeenCalledTimes(1)
 
 			unsubscribe()
 
 			userMachine.mutate(draft => {
-				draft.name = 'Jane'
+				draft.name = 'Bob'
 			})
+
+			await waitForNotification()
 
 			// Should not be called after unsubscribe
 			expect(listener).toHaveBeenCalledTimes(1)

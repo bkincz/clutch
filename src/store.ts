@@ -72,6 +72,7 @@ export class StateRegistry<T extends MachineStates> {
 	private machineUnsubscribers: Map<keyof T, () => void> = new Map()
 	private isDestroyed = false
 	private logger: ReturnType<typeof createLogger>
+	private cachedState: CombinedState<T> | null = null
 
 	constructor(config: RegistryConfig = {}) {
 		this.logger = createLogger(config.enableLogging ?? false)
@@ -94,12 +95,14 @@ export class StateRegistry<T extends MachineStates> {
 
 		this.machines.set(name, machine as unknown as StateMachine<T[keyof T]>)
 
-		// Subscribe to machine changes to notify store listeners
+		// Subscribe to machine changes to invalidate cache and notify listeners
 		const unsubscribe = machine.subscribe(() => {
+			this.cachedState = null
 			this.notifyListeners()
 		})
 		this.machineUnsubscribers.set(name, unsubscribe)
 
+		this.cachedState = null
 		this.logger.debug('Machine registered', { name })
 	}
 
@@ -119,6 +122,8 @@ export class StateRegistry<T extends MachineStates> {
 		}
 
 		this.machines.delete(name)
+		this.cachedState = null
+
 		this.logger.debug('Machine unregistered', { name })
 	}
 
@@ -141,12 +146,17 @@ export class StateRegistry<T extends MachineStates> {
 	public getState(): CombinedState<T> {
 		this.assertNotDestroyed()
 
+		if (this.cachedState) {
+			return this.cachedState
+		}
+
 		const combinedState = {} as CombinedState<T>
 
 		this.machines.forEach((machine, name) => {
 			combinedState[name as keyof T] = machine.getState() as T[keyof T]
 		})
 
+		this.cachedState = combinedState
 		return combinedState
 	}
 
@@ -167,14 +177,6 @@ export class StateRegistry<T extends MachineStates> {
 		}
 
 		this.listeners.add(listener)
-
-		// Call listener immediately with current state
-		try {
-			listener(this.getState())
-		} catch (error) {
-			this.logger.error('Initial listener call failed', error)
-		}
-
 		this.logger.debug('Store listener subscribed', { totalListeners: this.listeners.size })
 
 		return () => {
