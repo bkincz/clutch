@@ -218,6 +218,59 @@ const state = new StateMachine({
 
 Gracefully degrades when DevTools extension is not installed.
 
+### StateRegistry (Multi-Machine Management)
+
+Consolidate multiple state machines into a single coordinated store.
+
+```typescript
+import { StateMachine, StateRegistry } from '@bkincz/clutch'
+
+// Define your state types
+type UserState = { name: string; email: string }
+type TodosState = { items: { id: string; text: string }[] }
+
+// Define the store's machine registry
+type AppMachines = {
+  user: UserState
+  todos: TodosState
+}
+
+// Create individual machines
+class UserMachine extends StateMachine<UserState> {
+  constructor() {
+    super({ initialState: { name: '', email: '' } })
+  }
+}
+
+class TodosMachine extends StateMachine<TodosState> {
+  constructor() {
+    super({ initialState: { items: [] } })
+  }
+}
+
+// Create store and register machines
+const store = new StateRegistry<AppMachines>()
+store.register('user', new UserMachine())
+store.register('todos', new TodosMachine())
+
+// Get combined state from all machines
+const state = store.getState()
+// { user: { name: '', email: '' }, todos: { items: [] } }
+
+// Subscribe to any machine's changes
+store.subscribe((combinedState) => {
+  console.log('Something changed:', combinedState)
+})
+
+// Coordinated operations across all machines
+store.resetAll()        // Reset all machines to initial state
+store.clearAllHistory() // Clear undo history on all machines
+store.forceSaveAll()    // Persist all machines
+store.destroyAll()      // Clean up everything
+```
+
+> **Note:** When defining your machine registry type, use `type` instead of `interface` for TypeScript compatibility.
+
 ### Multi-Instance Sync
 
 Sync state across browser tabs using BroadcastChannel.
@@ -357,6 +410,57 @@ function TodoApp() {
 }
 ```
 
+### `useRegistry(store)`
+
+Subscribe to combined state from a `StateRegistry`.
+
+```typescript
+const state = useRegistry(store)
+// { user: { name: '', email: '' }, todos: { items: [] } }
+```
+
+### `useRegistrySlice(store, selector)`
+
+Subscribe to a slice of combined state for better performance.
+
+```typescript
+const userName = useRegistrySlice(store, s => s.user.name)
+const todoCount = useRegistrySlice(store, s => s.todos.items.length)
+```
+
+### `useRegistryMachine(store, machineName)`
+
+Subscribe to a specific machine's state.
+
+```typescript
+const userState = useRegistryMachine(store, 'user')
+const todosState = useRegistryMachine(store, 'todos')
+```
+
+### `useRegistryActions(store)`
+
+Get registry-wide actions without subscribing.
+
+```typescript
+const { resetAll, forceSaveAll, clearAllHistory, destroyAll } = useRegistryActions(store)
+```
+
+### `createRegistryHooks(store)`
+
+Create pre-bound hooks for a specific `StateRegistry`.
+
+```typescript
+const hooks = createRegistryHooks(store)
+
+function App() {
+  const state = hooks.useRegistry()
+  const userState = hooks.useMachine('user')
+  const { resetAll } = hooks.useActions()
+
+  return <div>...</div>
+}
+```
+
 ## Configuration
 
 ```typescript
@@ -424,6 +528,30 @@ getHistoryInfo(): StateHistoryInfo    // Get history state
 clearHistory(): void                   // Clear undo/redo
 canUndo(): boolean                     // Check if undo available
 canRedo(): boolean                     // Check if redo available
+```
+
+### Reset Methods
+
+```typescript
+reset(): void                          // Reset to initial state
+getInitialState(): T                   // Get the initial state
+```
+
+### StateRegistry Methods
+
+```typescript
+register(name, machine)                // Register a machine
+unregister(name)                       // Remove a machine
+getMachine(name)                       // Get a registered machine
+getMachineNames()                      // List all machine names
+getState()                             // Get combined state
+getMachineState(name)                  // Get specific machine state
+subscribe(listener)                    // Subscribe to any change
+subscribeToMachine(name, listener)     // Subscribe to specific machine
+resetAll()                             // Reset all machines
+forceSaveAll()                         // Save all machines
+clearAllHistory()                      // Clear all history
+destroyAll()                           // Destroy all machines
 ```
 
 ## Performance

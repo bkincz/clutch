@@ -739,6 +739,47 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	/*
+	 * RESET METHODS
+	 */
+	public reset(): void {
+		this.assertNotDestroyed()
+
+		const initialState = this.config.initialState
+
+		this.logger.debug('Resetting state to initial state')
+		this.validateState(initialState)
+
+		// Clear history
+		this.history = []
+		this.historyIndex = -1
+
+		// Reset state
+		this.state = initialState
+		this.isDirty = true
+
+		// Notify listeners
+		this.notifyListeners()
+
+		// Persist the reset state
+		this.persistToLocal()
+
+		if (this.devtools) {
+			this.devtools.send('State Reset', initialState, [])
+		}
+
+		// Broadcast to other tabs
+		if (this.syncManager) {
+			this.syncManager.broadcastChange(initialState, [], [], 'State Reset')
+		}
+
+		this.logger.info('State reset to initial state')
+	}
+
+	public getInitialState(): T {
+		return this.config.initialState
+	}
+
+	/*
 	 * CLEANUP METHODS
 	 */
 	public destroy(): void {
