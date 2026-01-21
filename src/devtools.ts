@@ -131,7 +131,40 @@ export class DevToolsConnector<T extends object> {
 				case 'JUMP_TO_STATE':
 				case 'JUMP_TO_ACTION':
 					if (message.state) {
-						this.onTimeTravel(JSON.parse(message.state))
+						// Parse with prototype pollution protection
+						const parsed = JSON.parse(message.state, (key, value) => {
+							// Reject dangerous keys that could lead to prototype pollution
+							if (
+								key === '__proto__' ||
+								key === 'constructor' ||
+								key === 'prototype'
+							) {
+								console.warn(
+									'[Clutch DevTools] Detected prototype pollution attempt'
+								)
+								return undefined
+							}
+							return value
+						})
+
+						// Validate parsed state
+						if (typeof parsed !== 'object' || parsed === null) {
+							console.error('[Clutch DevTools] Invalid state from DevTools')
+							return
+						}
+
+						// Additional validation: ensure no prototype pollution occurred
+						if (
+							Object.prototype.hasOwnProperty.call(parsed, '__proto__') ||
+							Object.prototype.hasOwnProperty.call(parsed, 'constructor')
+						) {
+							console.error(
+								'[Clutch DevTools] Detected prototype pollution in DevTools state'
+							)
+							return
+						}
+
+						this.onTimeTravel(parsed)
 					}
 					break
 
@@ -141,6 +174,24 @@ export class DevToolsConnector<T extends object> {
 						const computedStates = nextLiftedState.computedStates
 						const lastState = computedStates[computedStates.length - 1]
 						if (lastState?.state) {
+							// Validate imported state
+							if (typeof lastState.state !== 'object' || lastState.state === null) {
+								console.error('[Clutch DevTools] Invalid imported state')
+								return
+							}
+
+							// Check for prototype pollution in imported state
+							const stateStr = JSON.stringify(lastState.state)
+							if (
+								stateStr.includes('__proto__') ||
+								stateStr.includes('"constructor"')
+							) {
+								console.error(
+									'[Clutch DevTools] Detected prototype pollution in imported state'
+								)
+								return
+							}
+
 							this.onTimeTravel(lastState.state)
 						}
 					}
