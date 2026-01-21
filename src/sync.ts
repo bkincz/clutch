@@ -108,8 +108,21 @@ export class StateSyncManager<T extends object> {
 	}
 
 	private handleMessage(message: SyncMessage<T>): void {
+		// Validate message structure
+		if (!message || typeof message !== 'object') {
+			console.error('[Clutch Sync] Invalid message structure')
+			return
+		}
+
 		// Ignore messages from self
 		if (message.instanceId === this.instanceId) {
+			return
+		}
+
+		// Validate timestamp is reasonable (not too far in future/past)
+		const now = Date.now()
+		if (message.timestamp > now + 5000 || message.timestamp < now - 60000) {
+			console.error('[Clutch Sync] Invalid timestamp, possible attack')
 			return
 		}
 
@@ -122,6 +135,27 @@ export class StateSyncManager<T extends object> {
 			switch (message.type) {
 				case 'state_update':
 					if (message.state) {
+						if (typeof message.state !== 'object' || message.state === null) {
+							console.error('[Clutch Sync] Invalid state type')
+							return
+						}
+
+						const stateStr = JSON.stringify(message.state)
+						if (stateStr.includes('__proto__') || stateStr.includes('"constructor"')) {
+							console.error(
+								'[Clutch Sync] Potential prototype pollution detected in state'
+							)
+							return
+						}
+
+						if (
+							Object.prototype.hasOwnProperty.call(message.state, '__proto__') ||
+							Object.prototype.hasOwnProperty.call(message.state, 'constructor')
+						) {
+							console.error('[Clutch Sync] Detected dangerous properties in state')
+							return
+						}
+
 						this.applyRemoteState(message.state)
 						this.lastSyncTimestamp = message.timestamp
 					}
@@ -129,9 +163,42 @@ export class StateSyncManager<T extends object> {
 
 				case 'patches':
 					if (message.patches) {
-						// Apply patches to current state
+						if (!Array.isArray(message.patches)) {
+							console.error('[Clutch Sync] Invalid patches format')
+							return
+						}
+
+						for (const patch of message.patches) {
+							if (
+								!patch ||
+								typeof patch !== 'object' ||
+								!patch.op ||
+								!Array.isArray(patch.path)
+							) {
+								console.error('[Clutch Sync] Invalid patch structure')
+								return
+							}
+
+							for (const pathSegment of patch.path) {
+								if (
+									pathSegment === '__proto__' ||
+									pathSegment === 'constructor' ||
+									pathSegment === 'prototype'
+								) {
+									console.error('[Clutch Sync] Dangerous property in patch path')
+									return
+								}
+							}
+						}
+
 						const currentState = this.getCurrentState()
 						const patchedState = applyPatches(currentState, message.patches) as T
+
+						if (typeof patchedState !== 'object' || patchedState === null) {
+							console.error('[Clutch Sync] Invalid patched state')
+							return
+						}
+
 						this.applyRemoteState(patchedState, message.patches)
 						this.lastSyncTimestamp = message.timestamp
 					}
@@ -141,6 +208,9 @@ export class StateSyncManager<T extends object> {
 					// Another tab requesting full state
 					this.broadcastFullState()
 					break
+
+				default:
+					console.error('[Clutch Sync] Unknown message type:', message.type)
 			}
 		} catch (error) {
 			console.error('[Clutch Sync] Failed to handle message:', error)

@@ -187,14 +187,29 @@ const calculateMemoryUsage = (data: unknown): number => {
 	}
 }
 
-const generateChecksum = (data: unknown): string => {
+const generateChecksum = async (data: unknown): Promise<string> => {
 	try {
 		const str = JSON.stringify(data)
-		let hash = 0
-		for (let i = 0; i < str.length; i++) {
-			hash = ((hash << 5) - hash + str.charCodeAt(i)) & hash
+
+		// Use Web Crypto API if available (SHA-256)
+		if (typeof crypto !== 'undefined' && crypto.subtle) {
+			try {
+				const encoder = new TextEncoder()
+				const dataBuffer = encoder.encode(str)
+				const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer)
+				const hashArray = Array.from(new Uint8Array(hashBuffer))
+				return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
+			} catch {
+				// Fall through to fallback if crypto fails
+			}
 		}
-		return hash.toString(36)
+
+		// Fallback: Better non-cryptographic hash (djb2)
+		let hash = 5381
+		for (let i = 0; i < str.length; i++) {
+			hash = (hash << 5) + hash + str.charCodeAt(i)
+		}
+		return Math.abs(hash).toString(36)
 	} catch {
 		return ''
 	}
@@ -905,10 +920,39 @@ export abstract class StateMachine<T extends object> {
 			timestamp: Date.now(),
 		}
 
-		// Compose middleware chain in reverse order
+		// Freeze context to prevent modification
+		Object.freeze(context)
+
+		// Compose middleware chain in reverse order with timeout protection
 		const composed = this.config.middleware.reduceRight((next, middleware) => {
 			return (draft: Draft<T>) => {
-				middleware(context, next, draft)
+				let completed = false
+				const timeoutMs = 5000
+
+				const timer = setTimeout(() => {
+					if (!completed) {
+						const error = new StateMachineError(
+							'Middleware execution timeout',
+							'MIDDLEWARE_TIMEOUT'
+						)
+						this.logger.error('Middleware timeout', {
+							description,
+							operation,
+							timeoutMs,
+						})
+						throw error
+					}
+				}, timeoutMs)
+
+				try {
+					middleware(context, next, draft)
+					completed = true
+					clearTimeout(timer)
+				} catch (error) {
+					completed = true
+					clearTimeout(timer)
+					throw error
+				}
 			}
 		}, recipe)
 
@@ -1020,21 +1064,55 @@ export abstract class StateMachine<T extends object> {
 			return
 		}
 
-		try {
-			// Filter state before persisting
-			const stateToSave = this.filterStateForPersistence(this.state)
+		// Use async IIFE to handle async checksum generation
+		;(async () => {
+			try {
+				// Filter state before persisting
+				const stateToSave = this.filterStateForPersistence(this.state)
 
-			const persistedState: PersistedState<Partial<T>> = {
-				state: stateToSave,
-				timestamp: Date.now(),
-				version: DEFAULT_VERSION,
-				checksum: generateChecksum(stateToSave),
+				const checksum = await generateChecksum(stateToSave)
+
+				const persistedState: PersistedState<Partial<T>> = {
+					state: stateToSave,
+					timestamp: Date.now(),
+					version: DEFAULT_VERSION,
+					checksum: checksum,
+				}
+
+				const serialized = JSON.stringify(persistedState)
+
+				// Check size (5MB limit as conservative estimate for most browsers)
+				const sizeInBytes = new Blob([serialized]).size
+				const maxSizeBytes = 5 * 1024 * 1024 // 5MB
+
+				if (sizeInBytes > maxSizeBytes) {
+					this.logger.warn(
+						`State too large to persist: ${(sizeInBytes / 1024 / 1024).toFixed(2)}MB exceeds ${(maxSizeBytes / 1024 / 1024).toFixed(2)}MB limit`
+					)
+
+					this.emit('error', {
+						error: new StatePersistenceError('State too large for localStorage'),
+						operation: 'persist',
+					})
+
+					return
+				}
+
+				if (this.config.persistenceKey) {
+					localStorage.setItem(this.config.persistenceKey, serialized)
+				}
+			} catch (error) {
+				if (error instanceof Error && error.name === 'QuotaExceededError') {
+					this.logger.error('localStorage quota exceeded')
+					this.emit('error', {
+						error: new StatePersistenceError('localStorage quota exceeded'),
+						operation: 'persist',
+					})
+				} else {
+					this.logger.warn('Failed to persist state to localStorage', error)
+				}
 			}
-
-			localStorage.setItem(this.config.persistenceKey, JSON.stringify(persistedState))
-		} catch (error) {
-			this.logger.warn('Failed to persist state to localStorage', error)
-		}
+		})()
 	}
 
 	private loadPersistedState(): T | null {
@@ -1048,15 +1126,37 @@ export abstract class StateMachine<T extends object> {
 				return null
 			}
 
-			const persistedState: PersistedState<Partial<T>> = JSON.parse(stored)
-
-			// Validate checksum if present
-			if (persistedState.checksum) {
-				const expectedChecksum = generateChecksum(persistedState.state)
-				if (persistedState.checksum !== expectedChecksum) {
-					this.logger.warn('Persisted state checksum mismatch, ignoring')
-					return null
+			const parsed = JSON.parse(stored, (key, value) => {
+				if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+					this.logger.warn('Detected prototype pollution attempt in persisted state')
+					return undefined
 				}
+				return value
+			})
+
+			if (!parsed || typeof parsed !== 'object' || !parsed.state) {
+				this.logger.warn('Invalid persisted state structure')
+				return null
+			}
+
+			const persistedState = parsed as PersistedState<Partial<T>>
+
+			if (
+				Object.prototype.hasOwnProperty.call(persistedState, '__proto__') ||
+				Object.prototype.hasOwnProperty.call(persistedState, 'constructor') ||
+				Object.prototype.hasOwnProperty.call(persistedState.state, '__proto__') ||
+				Object.prototype.hasOwnProperty.call(persistedState.state, 'constructor')
+			) {
+				this.logger.warn('Detected prototype pollution in persisted state')
+				return null
+			}
+
+			if (persistedState.checksum) {
+				generateChecksum(persistedState.state).then(expectedChecksum => {
+					if (persistedState.checksum !== expectedChecksum) {
+						this.logger.warn('Persisted state checksum mismatch detected')
+					}
+				})
 			}
 
 			// Merge persisted state with initial state (for filtered fields)
