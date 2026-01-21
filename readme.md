@@ -1,303 +1,359 @@
+# Clutch
+
 [![Release](https://github.com/bkincz/clutch/actions/workflows/release.yml/badge.svg?branch=main)](https://github.com/bkincz/clutch/actions/workflows/release.yml)
 [![codecov](https://codecov.io/gh/bkincz/clutch/branch/main/graph/badge.svg)](https://codecov.io/gh/bkincz/clutch)
 [![npm version](https://badge.fury.io/js/@bkincz%2Fclutch.svg)](https://badge.fury.io/js/@bkincz%2Fclutch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg)](https://www.typescriptlang.org/)
 
-# Clutch - State Machine
-
-A production-ready, TypeScript-first state management library built on Immer with advanced features.
-
-This was primarily created for a personal project of mine called Kintsugi, hence the very specific features like `Auto-Save` or `Undo/Redo`, but I've found it a useful replacement for most state managers in my other projects.
-Thought I'd put it here for anyone that might want to use it as well.
-
-## Features
-
-- **Immutable Updates** - Powered by Immer for clean, mutable-style code that produces immutable state
-- **Undo/Redo** - Built-in history management using efficient patch-based storage
-- **Persistence** - Automatic localStorage backup with optional server synchronization
-- **Lifecycle Events** - Subscribe to state mutations, errors, and cleanup events
-- **Performance** - Debounced notifications, memory tracking, and efficient batch operations
-- **Type Safety** - Full TypeScript support with runtime validation
-- **Debugging** - Comprehensive logging system with structured output
-- **Memory Management** - Automatic cleanup and configurable history limits
-- **Auto-Save** - Configurable automatic persistence to prevent data loss
-
-## Installation
+A TypeScript-first state manager built on Immer with undo/redo, persistence, and debugging tools.
 
 ```bash
 npm install @bkincz/clutch
-# or
-yarn add @bkincz/clutch
-# or
-pnpm install @bkincz/clutch
 ```
 
 ## Quick Start
 
-### 1. Define Your State
-
 ```typescript
+import { StateMachine } from '@bkincz/clutch'
+
 interface AppState {
-  user: { id: string; name: string } | null;
-  todos: Array<{ id: string; text: string; completed: boolean }>;
-  ui: { loading: boolean; error: string | null };
+  count: number
+  todos: string[]
 }
 
-const initialState: AppState = {
-  user: null,
-  todos: [],
-  ui: { loading: false, error: null },
-};
-```
+const state = new StateMachine({
+  initialState: { count: 0, todos: [] }
+})
 
-### 2. Create Your State Machine
+// Mutate state with simple, mutable-style code
+state.mutate(draft => {
+  draft.count++
+  draft.todos.push('Learn Clutch')
+})
 
-```typescript
-import { StateMachine } from "@bkincz/clutch";
-
-class TodoState extends StateMachine<AppState> {
-  constructor() {
-    super({
-      initialState,
-      persistenceKey: "todo-app",
-      autoSaveInterval: 5, // minutes
-      enableLogging: process.env.NODE_ENV === "development",
-    });
-  }
-
-  // Optional: Override these methods only if you need server persistence
-  protected async saveToServer(state: AppState): Promise<void> {
-    await fetch("/api/state", {
-      method: "POST",
-      body: JSON.stringify(state),
-    });
-  }
-
-  protected async loadFromServer(): Promise<AppState | null> {
-    const response = await fetch("/api/state");
-    return response.ok ? await response.json() : null;
-  }
-}
-
-export const todoState = new TodoState();
-```
-
-### 3. Use in React
-
-```typescript
-import { useStateMachine } from "@bkincz/clutch";
-import { todoState } from "./todoState";
-
-function TodoApp() {
-  const { state, mutate } = useStateMachine(todoState);
-
-  const addTodo = (text: string) => {
-    mutate((draft) => {
-      draft.todos.push({
-        id: Date.now().toString(),
-        text,
-        completed: false,
-      });
-    }, "Add todo");
-  };
-
-  const toggleTodo = (id: string) => {
-    mutate((draft) => {
-      const todo = draft.todos.find((t) => t.id === id);
-      if (todo) {
-        todo.completed = !todo.completed;
-      }
-    }, "Toggle todo");
-  };
-
-  return (
-    <div>
-      <input
-        type="text"
-        onKeyDown={(e) => {
-          if (e.key === "Enter") {
-            addTodo(e.currentTarget.value);
-            e.currentTarget.value = "";
-          }
-        }}
-        placeholder="Add a todo..."
-      />
-      
-      {state.todos.map((todo) => (
-        <div key={todo.id}>
-          <input
-            type="checkbox"
-            checked={todo.completed}
-            onChange={() => toggleTodo(todo.id)}
-          />
-          <span>{todo.text}</span>
-        </div>
-      ))}
-    </div>
-  );
-}
+// Undo/Redo out of the box
+state.undo()
+state.redo()
 ```
 
 ## Core Features
 
-### Immutable Updates with Immer
+### Immutable Updates
 
-Write simple, mutable-looking code that produces immutable state:
+Powered by Immer - write simple mutations, get immutable state.
 
 ```typescript
-// Instead of complex spread operations
+// Instead of this
 const newState = {
   ...state,
-  todos: state.todos.map(todo => 
-    todo.id === id ? { ...todo, completed: !todo.completed } : todo
+  todos: state.todos.map(todo =>
+    todo.id === id ? { ...todo, completed: true } : todo
   )
-};
+}
 
-// Write simple mutations
+// Write this
 state.mutate(draft => {
-  const todo = draft.todos.find(t => t.id === id);
-  if (todo) {
-    todo.completed = !todo.completed;
-  }
-});
+  const todo = draft.todos.find(t => t.id === id)
+  if (todo) todo.completed = true
+})
 ```
 
 ### Undo/Redo
 
-```typescript
-import { useStateActions } from "@bkincz/clutch";
+Built-in history management using efficient patch-based storage.
 
-function UndoRedoButtons() {
-  const { undo, redo } = useStateActions(todoState);
-  
-  return (
-    <>
-      <button onClick={() => undo()}>Undo</button>
-      <button onClick={() => redo()}>Redo</button>
-    </>
-  );
-}
+```typescript
+state.mutate(draft => { draft.count++ }, 'increment')
+state.mutate(draft => { draft.count++ }, 'increment')
+
+state.undo() // count is back to 1
+state.redo() // count is 2 again
+
+state.clearHistory() // start fresh
 ```
 
 ### Batch Operations
 
-Group multiple changes into a single operation:
+Group multiple changes into a single undo/redo step.
 
 ```typescript
 state.batch([
-  draft => draft.todos.push(newTodo1),
-  draft => draft.todos.push(newTodo2),
-  draft => { draft.ui.loading = false; }
-], "Add multiple todos");
+  draft => { draft.count++ },
+  draft => { draft.todos.push('New todo') },
+  draft => { draft.loading = false }
+], 'bulk update')
 ```
 
-### Lifecycle Events
+### Persistence
 
-Subscribe to state machine events for logging, analytics, or side effects:
-
-```typescript
-// Subscribe to state changes
-const unsubscribe = todoState.on('afterMutate', (payload) => {
-  console.log(`[${payload.operation}] ${payload.description}`);
-  console.log('New state:', payload.state);
-  console.log('Patches applied:', payload.patches);
-});
-
-// Subscribe to errors
-todoState.on('error', (payload) => {
-  reportError(payload.error, { operation: payload.operation });
-});
-
-// Subscribe to cleanup
-todoState.on('destroy', (payload) => {
-  console.log('Final state before cleanup:', payload.finalState);
-});
-
-// Unsubscribe when done
-unsubscribe();
-```
-
-**Available Events:**
-
-| Event | Payload | Triggered When |
-|-------|---------|----------------|
-| `afterMutate` | `{ state, patches, inversePatches, description, operation }` | After any successful state change (mutate, batch, undo, redo) |
-| `error` | `{ error, operation }` | When a mutation or persistence operation fails |
-| `destroy` | `{ finalState }` | Before the state machine is cleaned up |
-
-**Zero-cost when unused:** Event listeners are lazily initialized - if you never subscribe to lifecycle events, there's no performance overhead.
-
-## React Hooks
-
-### `useStateMachine(engine)`
-Subscribe to entire state and get mutation methods.
-
-### `useStateSlice(engine, selector, equalityFn?)`
-Subscribe to a specific slice of state for better performance.
+Automatic localStorage backup with optional server sync.
 
 ```typescript
-const todoCount = useStateSlice(todoState, state => state.todos.length);
-const completedTodos = useStateSlice(
-  todoState, 
-  state => state.todos.filter(t => t.completed)
-);
-```
+const state = new StateMachine({
+  initialState: { count: 0 },
+  persistenceKey: 'my-app',
+  autoSaveInterval: 5 // minutes
+})
 
-### `useStateActions(engine)`
-Get mutation methods without subscribing to state changes.
+// Optional: add server persistence
+class MyState extends StateMachine<AppState> {
+  protected async saveToServer(state: AppState): Promise<void> {
+    await fetch('/api/state', {
+      method: 'POST',
+      body: JSON.stringify(state)
+    })
+  }
 
-### `useStateHistory(engine)`
-Access undo/redo state and controls.
-
-```typescript
-const { canUndo, canRedo, undo, redo } = useStateHistory(todoState);
-```
-
-### `useStatePersist(engine)`
-Handle save/load operations and persistence state.
-
-```typescript
-const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(todoState);
-```
-
-### `useLifecycleEvent(engine, event, listener)`
-Subscribe to lifecycle events with automatic cleanup.
-
-```typescript
-import { useLifecycleEvent } from "@bkincz/clutch";
-
-function StateLogger() {
-  useLifecycleEvent(todoState, 'afterMutate', (payload) => {
-    console.log(`State changed via ${payload.operation}:`, payload.state);
-  });
-
-  useLifecycleEvent(todoState, 'error', (payload) => {
-    console.error(`Error during ${payload.operation}:`, payload.error);
-  });
-
-  return null;
+  protected async loadFromServer(): Promise<AppState | null> {
+    const res = await fetch('/api/state')
+    return res.ok ? res.json() : null
+  }
 }
 ```
 
-### `createStateMachineHooks(engine)`
-Create pre-bound hooks for a specific state machine instance.
+## Advanced Features
+
+### Middleware
+
+Intercept mutations for validation, logging, or transformation.
 
 ```typescript
-import { createStateMachineHooks } from "@bkincz/clutch";
+import { Middleware } from '@bkincz/clutch'
 
-const todoHooks = createStateMachineHooks(todoState);
+// Validation middleware
+const validateCount: Middleware<AppState> = (ctx, next, draft) => {
+  next(draft)
+  if (draft.count < 0) {
+    throw new Error('Count cannot be negative')
+  }
+}
 
-// Use without passing engine to each hook
-function TodoComponent() {
-  const { state, mutate } = todoHooks.useState();
-  const { canUndo, undo } = todoHooks.useHistory();
+// Logging middleware
+const logger: Middleware<AppState> = (ctx, next, draft) => {
+  console.log('Before:', ctx.state)
+  next(draft)
+  console.log('After:', draft)
+}
 
-  todoHooks.useLifecycle('afterMutate', (payload) => {
-    console.log('Mutation:', payload.description);
-  });
+const state = new StateMachine({
+  initialState: { count: 0 },
+  middleware: [validateCount, logger]
+})
+```
 
-  return <div>{state.todos.length} todos</div>;
+Middleware executes in order, like Express.js:
+1. First middleware runs "before" code
+2. Calls `next(draft)` to pass control to next middleware
+3. After all middleware, the mutation executes
+4. Control returns back through middleware "after" code
+
+### Selective Persistence
+
+Exclude sensitive fields from localStorage.
+
+```typescript
+interface AppState {
+  user: { name: string; email: string }
+  authToken: string
+  preferences: object
+}
+
+const state = new StateMachine({
+  initialState: { ... },
+  persistenceKey: 'my-app',
+
+  // Option 1: Exclude specific fields
+  persistenceFilter: {
+    exclude: ['authToken']
+  },
+
+  // Option 2: Include only specific fields
+  persistenceFilter: {
+    include: ['user', 'preferences']
+  },
+
+  // Option 3: Custom filter function
+  persistenceFilter: {
+    custom: (state) => ({
+      user: { name: state.user.name }, // exclude email
+      preferences: state.preferences
+    })
+  }
+})
+```
+
+Excluded fields automatically fall back to `initialState` when loaded from localStorage.
+
+### DevTools Integration
+
+Connect to Redux DevTools browser extension for time-travel debugging.
+
+```typescript
+const state = new StateMachine({
+  initialState: { count: 0 },
+
+  // Simple: enable with defaults
+  enableDevTools: true,
+
+  // Advanced: customize behavior
+  enableDevTools: {
+    name: 'MyApp',           // Name in DevTools
+    maxAge: 50,              // Max actions to keep
+    latency: 500,            // Debounce updates
+    features: {
+      jump: true,            // Enable time-travel
+      skip: false,
+      export: true,
+      import: false
+    }
+  }
+})
+
+// Now open Redux DevTools extension to see:
+// - All mutations with descriptions
+// - State at each step
+// - Time-travel through history
+// - Import/export state
+```
+
+Gracefully degrades when DevTools extension is not installed.
+
+### Multi-Instance Sync
+
+Sync state across browser tabs using BroadcastChannel.
+
+```typescript
+const state = new StateMachine({
+  initialState: { count: 0 },
+
+  // Simple: enable with defaults
+  enableSync: true,
+
+  // Advanced: customize behavior
+  enableSync: {
+    channel: 'my-app-sync',      // BroadcastChannel name
+    syncDebounce: 50,             // Debounce updates (ms)
+    mergeStrategy: 'patches'      // 'patches' or 'latest'
+  }
+})
+
+// Now changes in one tab instantly appear in all other tabs
+// - 'patches': Send only the changes (more efficient)
+// - 'latest': Send full state (simpler, more reliable)
+```
+
+Works automatically in the background. Gracefully degrades when BroadcastChannel is not supported.
+
+### Lifecycle Events
+
+Subscribe to state changes, errors, and cleanup.
+
+```typescript
+// Subscribe to mutations
+const unsubscribe = state.on('afterMutate', (payload) => {
+  console.log(`[${payload.operation}] ${payload.description}`)
+  console.log('Patches:', payload.patches)
+  console.log('New state:', payload.state)
+})
+
+// Subscribe to errors
+state.on('error', (payload) => {
+  console.error(`Error in ${payload.operation}:`, payload.error)
+})
+
+// Subscribe to cleanup
+state.on('destroy', (payload) => {
+  console.log('Final state:', payload.finalState)
+})
+
+// Cleanup when done
+unsubscribe()
+```
+
+**Available Events:**
+- `afterMutate` - After any successful mutation (mutate, batch, undo, redo)
+- `error` - When a mutation or persistence operation fails
+- `destroy` - Before the state machine is cleaned up
+
+## React Hooks
+
+### `useStateMachine(state)`
+
+Subscribe to entire state.
+
+```typescript
+import { useStateMachine } from '@bkincz/clutch'
+
+function Counter() {
+  const { state, mutate } = useStateMachine(todoState)
+
+  return (
+    <button onClick={() => mutate(draft => { draft.count++ })}>
+      Count: {state.count}
+    </button>
+  )
+}
+```
+
+### `useStateSlice(state, selector)`
+
+Subscribe to a slice for better performance.
+
+```typescript
+const todoCount = useStateSlice(state, s => s.todos.length)
+const completedTodos = useStateSlice(state, s => s.todos.filter(t => t.completed))
+```
+
+### `useStateActions(state)`
+
+Get mutation methods without subscribing.
+
+```typescript
+const { mutate, batch, undo, redo } = useStateActions(state)
+```
+
+### `useStateHistory(state)`
+
+Access undo/redo controls.
+
+```typescript
+const { canUndo, canRedo, undo, redo } = useStateHistory(state)
+```
+
+### `useStatePersist(state)`
+
+Handle persistence operations.
+
+```typescript
+const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(state)
+```
+
+### `useLifecycleEvent(state, event, listener)`
+
+Subscribe to lifecycle events with automatic cleanup.
+
+```typescript
+useLifecycleEvent(state, 'afterMutate', (payload) => {
+  console.log('State changed:', payload.state)
+})
+```
+
+### `createStateMachineHooks(state)`
+
+Create pre-bound hooks for convenience.
+
+```typescript
+const hooks = createStateMachineHooks(todoState)
+
+function TodoApp() {
+  const { state, mutate } = hooks.useState()
+  const { canUndo, undo } = hooks.useHistory()
+
+  hooks.useLifecycle('afterMutate', (payload) => {
+    console.log('Changed:', payload.description)
+  })
+
+  return <div>...</div>
 }
 ```
 
@@ -305,14 +361,31 @@ function TodoComponent() {
 
 ```typescript
 interface StateConfig<T> {
-  initialState: T;
-  persistenceKey?: string;        // localStorage key
-  autoSaveInterval?: number;      // minutes (default: 5)
-  maxHistorySize?: number;        // undo history limit (default: 50)
-  enablePersistence?: boolean;    // localStorage backup (default: true)
-  enableAutoSave?: boolean;       // auto-save timer (default: true)
-  enableLogging?: boolean;        // debug logs (default: false)
-  validateState?: (state: T) => boolean; // state validation
+  // Required
+  initialState: T
+
+  // Persistence
+  persistenceKey?: string              // localStorage key
+  persistenceFilter?: PersistenceFilter<T> // exclude/include/custom
+  enablePersistence?: boolean          // default: true
+  autoSaveInterval?: number            // minutes, default: 5
+  enableAutoSave?: boolean             // default: true
+
+  // History
+  maxHistorySize?: number              // default: 50
+
+  // Middleware
+  middleware?: Middleware<T>[]
+
+  // DevTools
+  enableDevTools?: boolean | DevToolsConfig
+
+  // Sync
+  enableSync?: boolean | SyncConfig
+
+  // Validation & Debugging
+  validateState?: (state: T) => boolean
+  enableLogging?: boolean              // default: false
 }
 ```
 
@@ -320,28 +393,64 @@ interface StateConfig<T> {
 
 ### Core Methods
 
-- `getState(): T` - Get current state
-- `mutate(recipe, description?)` - Update state with Immer draft
-- `batch(mutations, description?)` - Batch multiple mutations
-- `subscribe(listener)` - Subscribe to state changes
-- `undo(): boolean` - Undo last operation
-- `redo(): boolean` - Redo next operation
-- `destroy()` - Clean up resources
+```typescript
+getState(): T                          // Get current state
+mutate(recipe, description?)           // Update state
+batch(mutations, description?)         // Batch multiple mutations
+subscribe(listener)                    // Subscribe to changes
+undo(): boolean                        // Undo last operation
+redo(): boolean                        // Redo next operation
+destroy()                              // Clean up resources
+```
 
 ### Lifecycle Methods
 
-- `on(event, listener): () => void` - Subscribe to lifecycle events, returns unsubscribe function
+```typescript
+on(event, listener): () => void        // Subscribe to events
+```
 
 ### Persistence Methods
 
-- `forceSave(): Promise<void>` - Immediately save state
-- `hasUnsavedChanges(): boolean` - Check for unsaved changes
-- `loadFromServerManually(): Promise<boolean>` - Manual server load
+```typescript
+forceSave(): Promise<void>             // Immediately save
+hasUnsavedChanges(): boolean           // Check unsaved changes
+loadFromServerManually(): Promise<boolean> // Manual server load
+```
 
 ### History Methods
 
-- `getHistoryInfo(): StateHistoryInfo` - Get current history state (canUndo, canRedo, historyLength, etc.)
-- `clearHistory(): void` - Clear all undo/redo history
+```typescript
+getHistoryInfo(): StateHistoryInfo    // Get history state
+clearHistory(): void                   // Clear undo/redo
+canUndo(): boolean                     // Check if undo available
+canRedo(): boolean                     // Check if redo available
+```
+
+## Performance
+
+- **Lightweight**: ~20KB minified
+- **Fast mutations**: < 1ms average overhead
+- **Efficient undo/redo**: Patch-based storage
+- **Optimized rendering**: Fine-grained subscriptions
+- **Lazy initialization**: Zero-cost for unused features
+- **Tree-shakeable**: Only bundle what you use
+
+## TypeScript
+
+Fully typed with automatic inference.
+
+```typescript
+const state = new StateMachine({
+  initialState: { count: 0, name: 'John' }
+})
+
+// TypeScript knows the exact shape
+state.mutate(draft => {
+  draft.count++      // ✓ number
+  draft.name = 'Jane' // ✓ string
+  draft.age = 25     // ✗ Property 'age' does not exist
+})
+```
 
 ## License
 
