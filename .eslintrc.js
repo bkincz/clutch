@@ -78,5 +78,11 @@ module.exports = {
         "@typescript-eslint/no-var-requires": "off",
       },
     },
+    {
+      files: ["src/devtools.ts", "src/sync.ts"],
+      rules: {
+        "@typescript-eslint/no-explicit-any": "off",
+      },
+    },
   ],
 };

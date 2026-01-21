@@ -8,6 +8,9 @@ export {
 	StatePersistenceError,
 } from './machine'
 
+export { DevToolsConnector } from './devtools'
+export { StateSyncManager } from './sync'
+
 /*
  *   REACT HOOK EXPORTS
  ***************************************************************************************************/
@@ -41,6 +44,13 @@ export type {
 	DestroyPayload,
 	LifecyclePayloadMap,
 	LifecycleListener,
+	Middleware,
+	MiddlewareContext,
+	MiddlewareNext,
+	PersistenceFilter,
 } from './machine'
+
+export type { DevToolsConfig } from './devtools'
+export type { SyncConfig } from './sync'
 
 export type { Draft } from 'immer'
