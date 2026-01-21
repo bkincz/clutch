@@ -8,6 +8,7 @@ import {
 	type LifecycleEvent,
 	type LifecyclePayloadMap,
 } from './machine'
+import { StateRegistry, type CombinedState, type MachineStates } from './store'
 
 /*
  *   TYPES
@@ -431,5 +432,117 @@ export function createStateMachineHooks<T extends object>(engine: StateMachine<T
 			event: E,
 			listener: (payload: LifecyclePayloadMap<T>[E]) => void
 		) => useLifecycleEvent(engine, event, listener),
+	}
+}
+
+/*
+ *   REGISTRY HOOKS
+ ***************************************************************************************************/
+
+/**
+ * Hook to subscribe to combined state from a StateRegistry
+ */
+export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
+	const [state, setState] = useState(() => store.getState())
+
+	useEffect(() => {
+		const unsubscribe = store.subscribe(setState)
+		return unsubscribe
+	}, [store])
+
+	return state
+}
+
+/**
+ * Hook to subscribe to a specific slice of combined store state
+ */
+export function useRegistrySlice<T extends MachineStates, TSelected>(
+	store: StateRegistry<T>,
+	selector: (state: CombinedState<T>) => TSelected,
+	equalityFn?: (a: TSelected, b: TSelected) => boolean
+) {
+	const [selectedState, setSelectedState] = useState(() => selector(store.getState()))
+
+	useEffect(() => {
+		const unsubscribe = store.subscribe(newState => {
+			const newSelected = selector(newState)
+
+			if (equalityFn) {
+				if (!equalityFn(selectedState, newSelected)) {
+					setSelectedState(newSelected)
+				}
+			} else if (selectedState !== newSelected) {
+				setSelectedState(newSelected)
+			}
+		})
+
+		return unsubscribe
+	}, [store, selector, selectedState, equalityFn])
+
+	return selectedState
+}
+
+/**
+ * Hook to subscribe to a specific machine's state within a store
+ */
+export function useRegistryMachine<T extends MachineStates, K extends keyof T>(
+	store: StateRegistry<T>,
+	machineName: K
+) {
+	const [state, setState] = useState(() => store.getMachineState(machineName))
+
+	useEffect(() => {
+		const unsubscribe = store.subscribeToMachine(machineName, setState)
+		return unsubscribe
+	}, [store, machineName])
+
+	return state
+}
+
+/**
+ * Hook that provides StateRegistry actions/methods
+ */
+export function useRegistryActions<T extends MachineStates>(store: StateRegistry<T>) {
+	const resetAll = useCallback(() => {
+		store.resetAll()
+	}, [store])
+
+	const forceSaveAll = useCallback(async () => {
+		return store.forceSaveAll()
+	}, [store])
+
+	const clearAllHistory = useCallback(() => {
+		store.clearAllHistory()
+	}, [store])
+
+	const destroyAll = useCallback(() => {
+		store.destroyAll()
+	}, [store])
+
+	const hasUnsavedChanges = useCallback(() => {
+		return store.hasUnsavedChanges()
+	}, [store])
+
+	return {
+		resetAll,
+		forceSaveAll,
+		clearAllHistory,
+		destroyAll,
+		hasUnsavedChanges,
+	}
+}
+
+/**
+ * Factory function to create typed hooks for a specific StateRegistry
+ */
+export function createRegistryHooks<T extends MachineStates>(store: StateRegistry<T>) {
+	return {
+		useRegistry: () => useRegistry(store),
+		useSlice: <TSelected>(
+			selector: (state: CombinedState<T>) => TSelected,
+			equalityFn?: (a: TSelected, b: TSelected) => boolean
+		) => useRegistrySlice(store, selector, equalityFn),
+		useMachine: <K extends keyof T>(machineName: K) => useRegistryMachine(store, machineName),
+		useActions: () => useRegistryActions(store),
 	}
 }
