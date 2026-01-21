@@ -86,6 +86,40 @@ export interface StateHistoryInfo {
 	memoryUsage: number
 }
 
+/*
+ *   LIFECYCLE EVENT TYPES
+ ***************************************************************************************************/
+export type LifecycleEvent = 'afterMutate' | 'error' | 'destroy'
+
+export type MutationOperation = 'mutate' | 'batch' | 'undo' | 'redo'
+
+export interface AfterMutatePayload<T> {
+	state: T
+	patches: Patch[]
+	inversePatches: Patch[]
+	description: string | undefined
+	operation: MutationOperation
+}
+
+export interface ErrorPayload {
+	error: Error
+	operation: MutationOperation | 'persist' | 'validate'
+}
+
+export interface DestroyPayload<T> {
+	finalState: T
+}
+
+export type LifecyclePayloadMap<T> = {
+	afterMutate: AfterMutatePayload<T>
+	error: ErrorPayload
+	destroy: DestroyPayload<T>
+}
+
+export type LifecycleListener<T, E extends LifecycleEvent> = (
+	payload: LifecyclePayloadMap<T>[E]
+) => void
+
 // Compact logger - will be optimized out in production builds
 /* eslint-disable no-console */
 const createLogger = (enabled: boolean) => ({
@@ -151,6 +185,10 @@ export abstract class StateMachine<T extends object> {
 	protected isDestroyed = false
 	protected logger: ReturnType<typeof createLogger>
 	protected debouncedNotify: () => void
+	protected eventListeners: Map<
+		LifecycleEvent,
+		Set<LifecycleListener<T, LifecycleEvent>>
+	> | null = null
 
 	constructor(config: StateConfig<T>) {
 		this.validateConfig(config)
@@ -175,6 +213,7 @@ export abstract class StateMachine<T extends object> {
 		} catch (error) {
 			this.logger.warn('Failed to load persisted state, using initial state', error)
 			this.state = config.initialState
+
 			// Validate the fallback initial state
 			this.validateCurrentState()
 		}
@@ -255,6 +294,14 @@ export abstract class StateMachine<T extends object> {
 				this.saveToHistory(patches, inversePatches, description)
 				this.setState(nextState)
 
+				this.emit('afterMutate', {
+					state: nextState,
+					patches,
+					inversePatches,
+					description,
+					operation: 'mutate',
+				})
+
 				this.logger.debug('State mutated', {
 					description,
 					patchCount: patches.length,
@@ -263,6 +310,11 @@ export abstract class StateMachine<T extends object> {
 			}
 		} catch (error) {
 			this.logger.error('State mutation failed', { description, error })
+
+			this.emit('error', {
+				error: error instanceof Error ? error : new Error(String(error)),
+				operation: 'mutate',
+			})
 
 			// Re-throw validation errors without wrapping them
 			if (error instanceof StateValidationError) {
@@ -318,6 +370,14 @@ export abstract class StateMachine<T extends object> {
 				this.saveToHistory(allPatches, allInversePatches, description || 'Batch operation')
 				this.setState(finalState)
 
+				this.emit('afterMutate', {
+					state: finalState,
+					patches: allPatches,
+					inversePatches: allInversePatches,
+					description,
+					operation: 'batch',
+				})
+
 				this.logger.debug('Batch operation completed', {
 					description,
 					mutationCount: mutations.length,
@@ -326,6 +386,12 @@ export abstract class StateMachine<T extends object> {
 			}
 		} catch (error) {
 			this.logger.error('Batch operation failed', { description, error })
+
+			this.emit('error', {
+				error: error instanceof Error ? error : new Error(String(error)),
+				operation: 'batch',
+			})
+
 			throw new StateMachineError(
 				`Batch operation failed: ${
 					error instanceof Error ? error.message : 'Unknown error'
@@ -357,6 +423,14 @@ export abstract class StateMachine<T extends object> {
 			this.historyIndex--
 			this.setState(newState, false)
 
+			this.emit('afterMutate', {
+				state: newState,
+				patches: snapshot.inversePatches,
+				inversePatches: snapshot.patches,
+				description: snapshot.description,
+				operation: 'undo',
+			})
+
 			this.logger.debug('Undo operation completed', {
 				description: snapshot.description,
 				newHistoryIndex: this.historyIndex,
@@ -365,6 +439,12 @@ export abstract class StateMachine<T extends object> {
 			return true
 		} catch (error) {
 			this.logger.error('Undo operation failed', error)
+
+			this.emit('error', {
+				error: error instanceof Error ? error : new Error(String(error)),
+				operation: 'undo',
+			})
+
 			return false
 		}
 	}
@@ -389,6 +469,14 @@ export abstract class StateMachine<T extends object> {
 			this.validateState(newState)
 			this.setState(newState, false)
 
+			this.emit('afterMutate', {
+				state: newState,
+				patches: snapshot.patches,
+				inversePatches: snapshot.inversePatches,
+				description: snapshot.description,
+				operation: 'redo',
+			})
+
 			this.logger.debug('Redo operation completed', {
 				description: snapshot.description,
 				newHistoryIndex: this.historyIndex,
@@ -397,6 +485,12 @@ export abstract class StateMachine<T extends object> {
 			return true
 		} catch (error) {
 			this.logger.error('Redo operation failed', error)
+
+			this.emit('error', {
+				error: error instanceof Error ? error : new Error(String(error)),
+				operation: 'redo',
+			})
+
 			this.historyIndex--
 			return false
 		}
@@ -435,6 +529,45 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	/*
+	 * LIFECYCLE EVENT METHODS
+	 */
+	public on<E extends LifecycleEvent>(event: E, listener: LifecycleListener<T, E>): () => void {
+		this.assertNotDestroyed()
+
+		if (!this.eventListeners) {
+			this.eventListeners = new Map()
+		}
+
+		let listeners = this.eventListeners.get(event)
+		if (!listeners) {
+			listeners = new Set()
+			this.eventListeners.set(event, listeners)
+		}
+
+		listeners.add(listener as LifecycleListener<T, LifecycleEvent>)
+
+		this.logger.debug('Lifecycle listener added', {
+			event,
+			totalListeners: listeners.size,
+		})
+
+		return () => {
+			const eventSet = this.eventListeners?.get(event)
+			if (eventSet) {
+				eventSet.delete(listener as LifecycleListener<T, LifecycleEvent>)
+
+				if (eventSet.size === 0) {
+					this.eventListeners?.delete(event)
+					if (this.eventListeners?.size === 0) {
+						this.eventListeners = null
+					}
+				}
+			}
+			this.logger.debug('Lifecycle listener removed', { event })
+		}
+	}
+
+	/*
 	 * SAVE/LOAD METHODS
 	 */
 	public async forceSave(): Promise<void> {
@@ -455,6 +588,12 @@ export abstract class StateMachine<T extends object> {
 			this.logger.info('Force save completed successfully')
 		} catch (error) {
 			this.logger.error('Force save failed', error)
+
+			this.emit('error', {
+				error: error instanceof Error ? error : new Error(String(error)),
+				operation: 'persist',
+			})
+
 			throw new StatePersistenceError(
 				`Force save failed: ${error instanceof Error ? error.message : 'Unknown error'}`
 			)
@@ -514,6 +653,7 @@ export abstract class StateMachine<T extends object> {
 		}
 
 		this.logger.info('Destroying StateMachine')
+		this.emit('destroy', { finalState: this.state })
 
 		this.isDestroyed = true
 		this.listeners.clear()
@@ -526,6 +666,7 @@ export abstract class StateMachine<T extends object> {
 		// Clear references to help garbage collection
 		this.history = []
 		this.listeners = new Set()
+		this.eventListeners = null
 
 		this.logger.info('StateMachine destroyed')
 	}
@@ -543,6 +684,21 @@ export abstract class StateMachine<T extends object> {
 
 		this.debouncedNotify()
 		this.persistToLocal()
+	}
+
+	protected emit<E extends LifecycleEvent>(event: E, payload: LifecyclePayloadMap<T>[E]): void {
+		const listeners = this.eventListeners?.get(event)
+		if (!listeners?.size) {
+			return
+		}
+
+		listeners.forEach(listener => {
+			try {
+				listener(payload)
+			} catch (error) {
+				this.logger.error(`Lifecycle event listener error for '${event}'`, error)
+			}
+		})
 	}
 
 	/*

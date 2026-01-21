@@ -23,11 +23,24 @@ export {
 	useStateSubscription,
 	useShallowEqual,
 	createStateMachineHooks,
+	useLifecycleEvent,
 } from './hooks'
 
 /*
  *   TYPE EXPORTS
  ***************************************************************************************************/
-export type { StateConfig, StateSnapshot, PersistedState, StateHistoryInfo } from './machine'
+export type {
+	StateConfig,
+	StateSnapshot,
+	PersistedState,
+	StateHistoryInfo,
+	LifecycleEvent,
+	MutationOperation,
+	AfterMutatePayload,
+	ErrorPayload,
+	DestroyPayload,
+	LifecyclePayloadMap,
+	LifecycleListener,
+} from './machine'
 
 export type { Draft } from 'immer'
