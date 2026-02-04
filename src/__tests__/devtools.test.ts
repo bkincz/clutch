@@ -21,7 +21,7 @@ describe('DevTools Integration', () => {
 		mockConnection = {
 			init: vi.fn(),
 			send: vi.fn(),
-			subscribe: vi.fn(() => vi.fn()), // Returns unsubscribe function
+			subscribe: vi.fn(() => vi.fn()),
 			unsubscribe: vi.fn(),
 		}
 
@@ -29,7 +29,7 @@ describe('DevTools Integration', () => {
 			connect: vi.fn(() => mockConnection),
 		}
 
-		// @ts-ignore - Mocking window object
+		// @ts-ignore
 		global.window = {
 			__REDUX_DEVTOOLS_EXTENSION__: mockExtension,
 		} as any
@@ -49,6 +49,7 @@ describe('DevTools Integration', () => {
 		expect(mockExtension.connect).toHaveBeenCalledWith(
 			expect.objectContaining({
 				name: 'StateMachine',
+				instanceId: expect.any(String),
 			})
 		)
 	})
@@ -64,6 +65,7 @@ describe('DevTools Integration', () => {
 		expect(mockExtension.connect).toHaveBeenCalledWith(
 			expect.objectContaining({
 				name: 'MyApp',
+				instanceId: expect.any(String),
 			})
 		)
 	})
@@ -156,7 +158,6 @@ describe('DevTools Integration', () => {
 			draft.count = 5
 		})
 
-		// Simulate DevTools time-travel
 		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
 		subscribeCallback({
 			type: 'DISPATCH',
@@ -182,7 +183,6 @@ describe('DevTools Integration', () => {
 
 		expect(machine.canUndo()).toBe(true)
 
-		// Time-travel
 		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
 		subscribeCallback({
 			type: 'DISPATCH',
@@ -190,7 +190,6 @@ describe('DevTools Integration', () => {
 			state: JSON.stringify({ count: 1, name: 'test' }),
 		})
 
-		// History should be cleared after time-travel
 		expect(machine.canUndo()).toBe(false)
 	})
 
@@ -232,11 +231,9 @@ describe('DevTools Integration', () => {
 	})
 
 	it('should gracefully handle missing DevTools extension', () => {
-		// Remove extension
 		// @ts-ignore
 		global.window = {} as any
 
-		// Should not throw
 		expect(() => {
 			new TestMachine({
 				initialState: { count: 0, name: 'test' },
@@ -272,7 +269,7 @@ describe('DevTools Integration', () => {
 
 		expect(mockConnection.send).toHaveBeenCalledWith(
 			expect.objectContaining({
-				patches: 2, // count and name changed
+				patches: 2,
 			}),
 			expect.any(Object),
 			{},
@@ -299,6 +296,7 @@ describe('DevTools Integration', () => {
 		expect(mockExtension.connect).toHaveBeenCalledWith(
 			expect.objectContaining({
 				name: 'CustomApp',
+				instanceId: expect.any(String),
 				maxAge: 100,
 				latency: 300,
 				features: {
@@ -320,23 +318,19 @@ describe('DevTools Integration', () => {
 
 		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
 
-		// Try to time-travel to invalid state
 		subscribeCallback({
 			type: 'DISPATCH',
 			payload: { type: 'JUMP_TO_STATE' },
 			state: JSON.stringify({ count: -1, name: 'test' }),
 		})
 
-		// State should remain unchanged
 		expect(machine.getState().count).toBe(0)
 	})
 
 	it('should work in non-browser environment', () => {
-		// Remove window
 		// @ts-ignore
 		global.window = undefined
 
-		// Should not throw
 		expect(() => {
 			new TestMachine({
 				initialState: { count: 0, name: 'test' },

@@ -96,7 +96,6 @@ describe('New Features Integration Tests', () => {
 
 	describe('Selective Persistence', () => {
 		it('should accept filter configuration', () => {
-			// Test that the config is accepted without errors
 			const machine = new TestMachine({
 				initialState: { count: 0, name: 'test', secret: 'password' },
 				persistenceKey: 'test-exclude',

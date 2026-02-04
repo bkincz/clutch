@@ -651,7 +651,6 @@ describe('StateMachine', () => {
 
 		describe('zero-cost when unused', () => {
 			it('should not create eventListeners map until first listener is added', () => {
-				// Perform mutations without any lifecycle listeners
 				stateMachine.mutate(draft => {
 					draft.count = 1
 				})
@@ -661,13 +660,11 @@ describe('StateMachine', () => {
 				stateMachine.undo()
 				stateMachine.redo()
 
-				// Access protected property for testing (this is a white-box test)
 				const machine = stateMachine as unknown as {
 					eventListeners: Map<string, Set<unknown>> | null
 				}
 				expect(machine.eventListeners).toBeNull()
 
-				// Now add a listener
 				stateMachine.on('afterMutate', vi.fn())
 
 				expect(machine.eventListeners).not.toBeNull()
@@ -685,11 +682,9 @@ describe('StateMachine', () => {
 				expect(machine.eventListeners).not.toBeNull()
 				expect(machine.eventListeners?.size).toBe(2)
 
-				// Remove one listener type completely
 				unsub1()
 				expect(machine.eventListeners?.size).toBe(1)
 
-				// Remove the last listener
 				unsub2()
 				expect(machine.eventListeners).toBeNull()
 			})

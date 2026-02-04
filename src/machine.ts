@@ -211,6 +211,7 @@ const generateChecksum = async (data: unknown): Promise<string> => {
 		}
 		return Math.abs(hash).toString(36)
 	} catch {
+		// Catch: If all else, ggwp no checksum.
 		return ''
 	}
 }
@@ -427,7 +428,6 @@ export abstract class StateMachine<T extends object> {
 					throw new StateValidationError(`Mutation at index ${index} must be a function`)
 				}
 
-				// Execute middleware chain for each mutation in batch
 				const finalRecipe = this.composeMiddleware(recipe, description, 'batch')
 
 				let patches: Patch[] = []
@@ -772,6 +772,7 @@ export abstract class StateMachine<T extends object> {
 			this.syncManager.broadcastChange(initialState, [], [], 'State Reset')
 		}
 
+		// Hopefully the entire state was reset
 		this.logger.info('State reset to initial state')
 	}
 
@@ -1016,7 +1017,6 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private handleDevToolsTimeTravel(newState: T): void {
-		// Time-travel from DevTools
 		try {
 			this.validateState(newState)
 			this.state = newState
@@ -1108,7 +1108,6 @@ export abstract class StateMachine<T extends object> {
 		// Use async IIFE to handle async checksum generation
 		;(async () => {
 			try {
-				// Filter state before persisting
 				const stateToSave = this.filterStateForPersistence(this.state)
 
 				const checksum = await generateChecksum(stateToSave)
@@ -1122,7 +1121,7 @@ export abstract class StateMachine<T extends object> {
 
 				const serialized = JSON.stringify(persistedState)
 
-				// Check size (5MB limit as conservative estimate for most browsers)
+				// Check size (5MB limit)
 				const sizeInBytes = new Blob([serialized]).size
 				const maxSizeBytes = 5 * 1024 * 1024 // 5MB
 
@@ -1200,7 +1199,6 @@ export abstract class StateMachine<T extends object> {
 				})
 			}
 
-			// Merge persisted state with initial state (for filtered fields)
 			const mergedState = {
 				...this.config.initialState,
 				...persistedState.state,

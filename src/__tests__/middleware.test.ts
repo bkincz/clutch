@@ -84,7 +84,7 @@ describe('Middleware', () => {
 	it('should allow transformation in middleware', () => {
 		const sanitizeMiddleware: Middleware<TestState> = (ctx, next, draft) => {
 			next(draft)
-			// Transform after mutation
+
 			if (draft.name) {
 				draft.name = draft.name.trim().toLowerCase()
 			}
@@ -121,7 +121,6 @@ describe('Middleware', () => {
 			})
 		}).toThrow('Count cannot be negative')
 
-		// State should not change on validation error
 		expect(machine.getState().count).toBe(5)
 	})
 
@@ -238,7 +237,6 @@ describe('Middleware', () => {
 			})
 		}).toThrow('Count limit reached')
 
-		// State should remain unchanged
 		expect(machine.getState().count).toBe(10)
 	})
 
@@ -255,13 +253,11 @@ describe('Middleware', () => {
 			middleware: [middleware],
 		})
 
-		// Test mutate operation
 		machine.mutate(draft => {
 			draft.count++
 		})
 		expect(capturedOperation).toBe('mutate')
 
-		// Test batch operation
 		machine.batch([
 			draft => {
 				draft.count++
@@ -272,7 +268,6 @@ describe('Middleware', () => {
 
 	it('should allow middleware to modify draft before recipe', () => {
 		const preprocessMiddleware: Middleware<TestState> = (ctx, next, draft) => {
-			// Add timestamp to logs before mutation
 			draft.logs.push(`[${Date.now()}] Mutation started`)
 			next(draft)
 		}

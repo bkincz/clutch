@@ -10,7 +10,13 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
-    }
+    },
+    "./react": {
+      "types": "./dist/react.d.ts",
+      "import": "./dist/react.mjs",
+      "require": "./dist/react.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",
@@ -57,6 +63,11 @@
     "immer": ">=9.0.0",
     "react": ">=16.8.0 || ^19.0.0"
   },
+  "peerDependenciesMeta": {
+    "react": {
+      "optional": true
+    }
+  },
   "dependencies": {
     "immer": ">=9.0.0"
   },
@@ -85,10 +96,18 @@
   },
   "size-limit": [
     {
+      "name": "Core (without React)",
       "path": "dist/index.js",
-      "limit": "15 KB"
+      "import": "{ StateMachine, StateRegistry }",
+      "limit": "12 KB"
     },
     {
+      "name": "React hooks",
+      "path": "dist/react.js",
+      "limit": "5 KB"
+    },
+    {
+      "name": "Full bundle",
       "path": "dist/index.mjs",
       "limit": "15 KB"
     }

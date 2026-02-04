@@ -181,7 +181,6 @@ describe('StateRegistry', () => {
 			const unsubscribe = store.subscribe(listener)
 			expect(listener).toHaveBeenCalledTimes(0)
 
-			// Trigger a mutation to verify subscription works
 			userMachine.mutate(draft => {
 				draft.name = 'Jane'
 			})
@@ -197,7 +196,6 @@ describe('StateRegistry', () => {
 
 			await waitForNotification()
 
-			// Should not be called after unsubscribe
 			expect(listener).toHaveBeenCalledTimes(1)
 		})
 
@@ -208,10 +206,8 @@ describe('StateRegistry', () => {
 
 			store.subscribeToMachine('user', listener)
 
-			// Should be called immediately
 			expect(listener).toHaveBeenCalledTimes(1)
 
-			// Should be called when subscribed machine changes (after debounce)
 			userMachine.mutate(draft => {
 				draft.name = 'Jane'
 			})
@@ -220,7 +216,6 @@ describe('StateRegistry', () => {
 
 			expect(listener).toHaveBeenCalledTimes(2)
 
-			// Should NOT be called when other machine changes
 			todosMachine.mutate(draft => {
 				draft.items.push({ id: '2', text: 'New', completed: false })
 			})
@@ -247,7 +242,6 @@ describe('StateRegistry', () => {
 		})
 
 		it('should reset all machines', () => {
-			// Mutate all machines
 			userMachine.mutate(draft => {
 				draft.name = 'Changed'
 			})
@@ -258,10 +252,7 @@ describe('StateRegistry', () => {
 				draft.theme = 'light'
 			})
 
-			// Reset all
 			store.resetAll()
-
-			// All should be back to initial state
 			const state = store.getState()
 			expect(state.user).toEqual({ name: 'John', email: 'john@example.com' })
 			expect(state.todos).toEqual({ items: [{ id: '1', text: 'Test', completed: false }] })
@@ -269,7 +260,6 @@ describe('StateRegistry', () => {
 		})
 
 		it('should force save all machines', async () => {
-			// Make changes to mark dirty
 			userMachine.mutate(draft => {
 				draft.name = 'Changed'
 			})
@@ -314,10 +304,7 @@ describe('StateRegistry', () => {
 
 			store.destroyAll()
 
-			// Store should be destroyed
 			expect(() => store.getState()).toThrow(StateMachineError)
-
-			// Individual machines should be destroyed
 			expect(() => userMachine.getState()).toThrow(StateMachineError)
 			expect(() => todosMachine.getState()).toThrow(StateMachineError)
 		})

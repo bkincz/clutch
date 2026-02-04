@@ -7,8 +7,8 @@ import {
 	type StateHistoryInfo,
 	type LifecycleEvent,
 	type LifecyclePayloadMap,
-} from './machine'
-import { StateRegistry, type CombinedState, type MachineStates } from './store'
+} from '../../machine'
+import { StateRegistry, type CombinedState, type MachineStates } from '../../store'
 
 /*
  *   TYPES
