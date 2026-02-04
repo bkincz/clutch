@@ -1,7 +1,14 @@
 /*
  *   IMPORTS
  ***************************************************************************************************/
-import { type DependencyList, useEffect, useState, useCallback, useRef } from 'react'
+import {
+	type DependencyList,
+	useEffect,
+	useState,
+	useCallback,
+	useRef,
+	useSyncExternalStore,
+} from 'react'
 import {
 	StateMachine,
 	type StateHistoryInfo,
@@ -23,12 +30,16 @@ import type { Draft } from 'immer'
  * Basic hook to subscribe to a StateMachine instance
  */
 export function useStateMachine<T extends object>(engine: StateMachine<T>) {
-	const [state, setState] = useState(() => engine.getState())
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return engine.subscribe(onStoreChange)
+		},
+		[engine]
+	)
 
-	useEffect(() => {
-		const unsubscribe = engine.subscribe(setState)
-		return unsubscribe
-	}, [engine])
+	const getSnapshot = useCallback(() => engine.getState(), [engine])
+
+	const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 
 	const mutate = useCallback(
 		(recipe: (draft: Draft<T>) => void, description?: string) => {
@@ -53,37 +64,51 @@ export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 
 /**
  * Hook to subscribe to a specific slice of state with a selector function.
- * Uses refs to avoid stale closures and unnecessary re-subscriptions.
  */
 export function useStateSlice<T extends object, TSelected>(
 	engine: StateMachine<T>,
 	selector: (state: T) => TSelected,
 	equalityFn: (a: TSelected, b: TSelected) => boolean = Object.is
 ) {
-	const [selectedState, setSelectedState] = useState(() => selector(engine.getState()))
-
 	const selectorRef = useRef(selector)
 	const equalityFnRef = useRef(equalityFn)
-	const selectedStateRef = useRef(selectedState)
+	const selectedRef = useRef<TSelected | undefined>(undefined)
+	const hasSelectedRef = useRef(false)
 
-	// Update refs on each render to always have latest values
 	selectorRef.current = selector
 	equalityFnRef.current = equalityFn
-	selectedStateRef.current = selectedState
 
-	useEffect(() => {
-		const unsubscribe = engine.subscribe(newState => {
-			const newSelected = selectorRef.current(newState)
-			if (!equalityFnRef.current(selectedStateRef.current, newSelected)) {
-				selectedStateRef.current = newSelected
-				setSelectedState(newSelected)
-			}
-		})
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return engine.subscribe((state: T) => {
+				const newSelected = selectorRef.current(state)
 
-		return unsubscribe
+				if (
+					!hasSelectedRef.current ||
+					!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
+				) {
+					selectedRef.current = newSelected
+					hasSelectedRef.current = true
+					onStoreChange()
+				}
+			})
+		},
+		[engine]
+	)
+
+	const getSnapshot = useCallback(() => {
+		const currentState = engine.getState()
+		const selected = selectorRef.current(currentState)
+
+		if (!hasSelectedRef.current) {
+			selectedRef.current = selected
+			hasSelectedRef.current = true
+		}
+
+		return selectedRef.current as TSelected
 	}, [engine])
 
-	return selectedState
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
@@ -449,50 +474,65 @@ export function createStateMachineHooks<T extends object>(engine: StateMachine<T
  * Hook to subscribe to combined state from a StateRegistry
  */
 export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
-	const [state, setState] = useState(() => store.getState())
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return store.subscribe(onStoreChange)
+		},
+		[store]
+	)
 
-	useEffect(() => {
-		const unsubscribe = store.subscribe(setState)
-		return unsubscribe
-	}, [store])
+	const getSnapshot = useCallback(() => store.getState(), [store])
 
-	return state
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
  * Hook to subscribe to a specific slice of combined store state.
- * Uses refs to avoid stale closures and unnecessary re-subscriptions.
  */
 export function useRegistrySlice<T extends MachineStates, TSelected>(
 	store: StateRegistry<T>,
 	selector: (state: CombinedState<T>) => TSelected,
 	equalityFn: (a: TSelected, b: TSelected) => boolean = Object.is
 ) {
-	const [selectedState, setSelectedState] = useState(() => selector(store.getState()))
-
 	const selectorRef = useRef(selector)
 	const equalityFnRef = useRef(equalityFn)
-	const selectedStateRef = useRef(selectedState)
+	const selectedRef = useRef<TSelected | undefined>(undefined)
+	const hasSelectedRef = useRef(false)
 
-	// Update refs on each render to always have latest values -
-	// Need to watch this as im unsure if this is the best approach atm...
 	selectorRef.current = selector
 	equalityFnRef.current = equalityFn
-	selectedStateRef.current = selectedState
 
-	useEffect(() => {
-		const unsubscribe = store.subscribe(newState => {
-			const newSelected = selectorRef.current(newState)
-			if (!equalityFnRef.current(selectedStateRef.current, newSelected)) {
-				selectedStateRef.current = newSelected
-				setSelectedState(newSelected)
-			}
-		})
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return store.subscribe((state: CombinedState<T>) => {
+				const newSelected = selectorRef.current(state)
 
-		return unsubscribe
+				if (
+					!hasSelectedRef.current ||
+					!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
+				) {
+					selectedRef.current = newSelected
+					hasSelectedRef.current = true
+					onStoreChange()
+				}
+			})
+		},
+		[store]
+	)
+
+	const getSnapshot = useCallback(() => {
+		const currentState = store.getState()
+		const selected = selectorRef.current(currentState)
+
+		if (!hasSelectedRef.current) {
+			selectedRef.current = selected
+			hasSelectedRef.current = true
+		}
+
+		return selectedRef.current as TSelected
 	}, [store])
 
-	return selectedState
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
@@ -502,14 +542,18 @@ export function useRegistryMachine<T extends MachineStates, K extends keyof T>(
 	store: StateRegistry<T>,
 	machineName: K
 ) {
-	const [state, setState] = useState(() => store.getMachineState(machineName))
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return store.subscribeToMachine(machineName, () => {
+				onStoreChange()
+			})
+		},
+		[store, machineName]
+	)
 
-	useEffect(() => {
-		const unsubscribe = store.subscribeToMachine(machineName, setState)
-		return unsubscribe
-	}, [store, machineName])
+	const getSnapshot = useCallback(() => store.getMachineState(machineName), [store, machineName])
 
-	return state
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /**
