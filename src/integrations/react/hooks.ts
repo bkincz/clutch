@@ -9,12 +9,7 @@ import {
 	useRef,
 	useSyncExternalStore,
 } from 'react'
-import {
-	StateMachine,
-	type StateHistoryInfo,
-	type LifecycleEvent,
-	type LifecyclePayloadMap,
-} from '../../machine'
+import { StateMachine, type LifecycleEvent, type LifecyclePayloadMap } from '../../machine'
 import { StateRegistry, type CombinedState, type MachineStates } from '../../store'
 
 /*
@@ -38,8 +33,8 @@ export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 	)
 
 	const getSnapshot = useCallback(() => engine.getState(), [engine])
-
-	const state = useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+	const getServerSnapshot = useCallback(() => engine.getState(), [engine])
+	const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 
 	const mutate = useCallback(
 		(recipe: (draft: Draft<T>) => void, description?: string) => {
@@ -108,7 +103,12 @@ export function useStateSlice<T extends object, TSelected>(
 		return selectedRef.current as TSelected
 	}, [engine])
 
-	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+	const getServerSnapshot = useCallback(() => {
+		const currentState = engine.getState()
+		return selectorRef.current(currentState)
+	}, [engine])
+
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 /**
@@ -164,36 +164,27 @@ export function useStateActions<T extends object>(engine: StateMachine<T>) {
  * Hook specifically for undo/redo functionality
  */
 export function useStateHistory<T extends object>(engine: StateMachine<T>) {
-	const [historyInfo, setHistoryInfo] = useState<StateHistoryInfo>(() => engine.getHistoryInfo())
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => {
+			return engine.subscribe(onStoreChange)
+		},
+		[engine]
+	)
 
-	useEffect(() => {
-		const updateHistory = () => {
-			setHistoryInfo(engine.getHistoryInfo())
-		}
-
-		const unsubscribe = engine.subscribe(updateHistory)
-		return unsubscribe
-	}, [engine])
+	const getSnapshot = useCallback(() => engine.getHistoryInfo(), [engine])
+	const getServerSnapshot = useCallback(() => engine.getHistoryInfo(), [engine])
+	const historyInfo = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 
 	const undo = useCallback(() => {
-		const success = engine.undo()
-		if (success) {
-			setHistoryInfo(engine.getHistoryInfo())
-		}
-		return success
+		return engine.undo()
 	}, [engine])
 
 	const redo = useCallback(() => {
-		const success = engine.redo()
-		if (success) {
-			setHistoryInfo(engine.getHistoryInfo())
-		}
-		return success
+		return engine.redo()
 	}, [engine])
 
 	const clearHistory = useCallback(() => {
 		engine.clearHistory()
-		setHistoryInfo(engine.getHistoryInfo())
 	}, [engine])
 
 	return {
@@ -213,8 +204,16 @@ export function useStatePersist<T extends object>(engine: StateMachine<T>) {
 	const [lastSaved, setLastSaved] = useState<Date | null>(null)
 	const [saveError, setSaveError] = useState<string | null>(null)
 	const [loadError, setLoadError] = useState<string | null>(null)
+	const [hasUnsavedChanges, setHasUnsavedChanges] = useState(() => engine.hasUnsavedChanges())
 
-	const hasUnsavedChanges = engine.hasUnsavedChanges()
+	useEffect(() => {
+		const updateUnsavedStatus = () => {
+			setHasUnsavedChanges(engine.hasUnsavedChanges())
+		}
+
+		const unsubscribe = engine.subscribe(updateUnsavedStatus)
+		return unsubscribe
+	}, [engine])
 
 	const save = useCallback(async () => {
 		if (isSaving) {
@@ -334,16 +333,28 @@ export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
 			serverUpdate: () => Promise<void>,
 			description?: string
 		) => {
+			// Store the current history info before applying optimistic update
+			const historyBeforeUpdate = engine.getHistoryInfo()
+			const targetIndex = historyBeforeUpdate.currentIndex
+
 			// Apply optimistic update
 			engine.mutate(optimisticUpdate, `${description} (optimistic)`)
 
 			try {
 				// Attempt server update
 				await serverUpdate()
-				// If successful, the optimistic update stands
+				// If successful, the optimistic update stands and we dont need to do anything else
 			} catch (error) {
-				// If failed, undo the optimistic update
-				engine.undo()
+				// If failed, undo back to the exact state before the optimistic update
+				// This handles cases where other mutations happened in between
+				const currentInfo = engine.getHistoryInfo()
+				const undoCount = currentInfo.currentIndex - targetIndex
+
+				for (let i = 0; i < undoCount; i++) {
+					if (engine.canUndo()) {
+						engine.undo()
+					}
+				}
 				throw error
 			}
 		},
@@ -357,22 +368,27 @@ export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
  * Hook for debounced state updates (useful for search inputs, etc.)
  */
 export function useDebouncedStateUpdate<T extends object>(engine: StateMachine<T>, delay = 300) {
-	const [debouncedMutate] = useState(() => {
-		let timeoutId: ReturnType<typeof setTimeout>
+	const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-		return (recipe: (draft: Draft<T>) => void, description?: string) => {
-			clearTimeout(timeoutId)
-			timeoutId = setTimeout(() => {
+	const debouncedMutate = useCallback(
+		(recipe: (draft: Draft<T>) => void, description?: string) => {
+			if (timeoutRef.current) {
+				clearTimeout(timeoutRef.current)
+			}
+			timeoutRef.current = setTimeout(() => {
 				engine.mutate(recipe, description)
 			}, delay)
-		}
-	})
+		},
+		[engine, delay]
+	)
 
 	useEffect(() => {
 		return () => {
-			clearTimeout(debouncedMutate as unknown as ReturnType<typeof setTimeout>)
+			if (timeoutRef.current) {
+				clearTimeout(timeoutRef.current)
+			}
 		}
-	}, [debouncedMutate])
+	}, [])
 
 	return { debouncedMutate }
 }
@@ -413,30 +429,43 @@ export function useLifecycleEvent<T extends object, E extends LifecycleEvent>(
  */
 export function useShallowEqual<T>(value: T): T {
 	const [state, setState] = useState(value)
+	const prevValueRef = useRef(value)
 
-	useEffect(() => {
-		if (typeof value === 'object' && value !== null) {
+	if (prevValueRef.current !== value) {
+		let shouldUpdate = false
+
+		if (
+			typeof value === 'object' &&
+			value !== null &&
+			typeof state === 'object' &&
+			state !== null
+		) {
 			const keys1 = Object.keys(state as Record<string, unknown>)
 			const keys2 = Object.keys(value as Record<string, unknown>)
 
 			if (keys1.length !== keys2.length) {
-				setState(value)
-				return
-			}
-
-			for (const key of keys1) {
-				if (
-					(state as Record<string, unknown>)[key] !==
-					(value as Record<string, unknown>)[key]
-				) {
-					setState(value)
-					return
+				shouldUpdate = true
+			} else {
+				for (const key of keys2) {
+					if (
+						(state as Record<string, unknown>)[key] !==
+						(value as Record<string, unknown>)[key]
+					) {
+						shouldUpdate = true
+						break
+					}
 				}
 			}
 		} else if (state !== value) {
+			shouldUpdate = true
+		}
+
+		if (shouldUpdate) {
 			setState(value)
 		}
-	}, [value, state])
+
+		prevValueRef.current = value
+	}
 
 	return state
 }
@@ -483,7 +512,9 @@ export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
 
 	const getSnapshot = useCallback(() => store.getState(), [store])
 
-	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+	const getServerSnapshot = useCallback(() => store.getState(), [store])
+
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 /**
@@ -532,7 +563,12 @@ export function useRegistrySlice<T extends MachineStates, TSelected>(
 		return selectedRef.current as TSelected
 	}, [store])
 
-	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+	const getServerSnapshot = useCallback(() => {
+		const currentState = store.getState()
+		return selectorRef.current(currentState)
+	}, [store])
+
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 /**
@@ -553,7 +589,12 @@ export function useRegistryMachine<T extends MachineStates, K extends keyof T>(
 
 	const getSnapshot = useCallback(() => store.getMachineState(machineName), [store, machineName])
 
-	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+	const getServerSnapshot = useCallback(
+		() => store.getMachineState(machineName),
+		[store, machineName]
+	)
+
+	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
 /**
