@@ -127,12 +127,9 @@ describe('React Hooks - StateMachine', () => {
 			const { result } = renderHook(() => useStateMachine(engine))
 
 			act(() => {
-				result.current.mutate(
-					draft => {
-						draft.count = 7
-					},
-					'increment count'
-				)
+				result.current.mutate(draft => {
+					draft.count = 7
+				}, 'increment count')
 			})
 
 			await waitFor(() => {
@@ -143,9 +140,7 @@ describe('React Hooks - StateMachine', () => {
 
 	describe('useStateSlice', () => {
 		it('should return selected slice of state', () => {
-			const { result } = renderHook(() =>
-				useStateSlice(engine, state => state.count)
-			)
+			const { result } = renderHook(() => useStateSlice(engine, state => state.count))
 
 			expect(result.current).toBe(0)
 		})
@@ -169,9 +164,7 @@ describe('React Hooks - StateMachine', () => {
 		})
 
 		it('should re-render when selected slice changes', async () => {
-			const { result } = renderHook(() =>
-				useStateSlice(engine, state => state.count)
-			)
+			const { result } = renderHook(() => useStateSlice(engine, state => state.count))
 
 			act(() => {
 				engine.mutate(draft => {
@@ -203,9 +196,7 @@ describe('React Hooks - StateMachine', () => {
 		})
 
 		it('should handle complex nested selections', async () => {
-			const { result } = renderHook(() =>
-				useStateSlice(engine, state => state.nested.value)
-			)
+			const { result } = renderHook(() => useStateSlice(engine, state => state.nested.value))
 
 			expect(result.current).toBe(10)
 
@@ -330,7 +321,10 @@ describe('React Hooks - StateMachine', () => {
 
 		it.skip('should handle loadFromServer', async () => {
 			// Note: This test is skipped due to timing issues with auto-load during initialization
-			localStorage.setItem('test-load', JSON.stringify({ count: 99, name: 'loaded', nested: { value: 5 } }))
+			localStorage.setItem(
+				'test-load',
+				JSON.stringify({ count: 99, name: 'loaded', nested: { value: 5 } })
+			)
 
 			const persistEngine = new TestStateMachine({
 				persistenceKey: 'test-load',
@@ -456,7 +450,10 @@ describe('React Hooks - StateMachine', () => {
 
 		it.skip('should handle successful load', async () => {
 			// Note: This test is skipped due to timing issues with auto-load during initialization
-			localStorage.setItem('persist-load-test', JSON.stringify({ count: 50, name: 'loaded', nested: { value: 1 } }))
+			localStorage.setItem(
+				'persist-load-test',
+				JSON.stringify({ count: 50, name: 'loaded', nested: { value: 1 } })
+			)
 
 			const persistEngine = new TestStateMachine({
 				persistenceKey: 'persist-load-test',
@@ -531,12 +528,9 @@ describe('React Hooks - StateMachine', () => {
 
 			try {
 				await act(async () => {
-					await result.current.mutateOptimistic(
-						draft => {
-							draft.count = 999
-						},
-						mockServerUpdate
-					)
+					await result.current.mutateOptimistic(draft => {
+						draft.count = 999
+					}, mockServerUpdate)
 				})
 			} catch (error) {
 				// Expected to throw
@@ -557,12 +551,9 @@ describe('React Hooks - StateMachine', () => {
 
 			try {
 				await act(async () => {
-					await result.current.mutateOptimistic(
-						draft => {
-							draft.count = 10
-						},
-						mockServerUpdate
-					)
+					await result.current.mutateOptimistic(draft => {
+						draft.count = 10
+					}, mockServerUpdate)
 				})
 			} catch (error) {
 				// Expected
@@ -766,7 +757,9 @@ describe('React Hooks - StateMachine', () => {
 
 		it('should update listener reference without resubscribing', () => {
 			let listener = vi.fn()
-			const { rerender } = renderHook(() => useLifecycleEvent(engine, 'afterMutate', listener))
+			const { rerender } = renderHook(() =>
+				useLifecycleEvent(engine, 'afterMutate', listener)
+			)
 
 			const newListener = vi.fn()
 			listener = newListener
@@ -926,7 +919,7 @@ describe('React Hooks - StateRegistry', () => {
 			const { result } = renderHook(() => useRegistry(registry))
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 5
 				})
 			})
@@ -948,12 +941,10 @@ describe('React Hooks - StateRegistry', () => {
 
 		it('should only re-render when selected slice changes', () => {
 			const selector = vi.fn(state => state.counter.count)
-			const { result, rerender } = renderHook(() =>
-				useRegistrySlice(registry, selector)
-			)
+			const { result, rerender } = renderHook(() => useRegistrySlice(registry, selector))
 
 			act(() => {
-				(registry.getMachine('user') as UserMachine).mutate(draft => {
+				;(registry.getMachine('user') as UserMachine).mutate(draft => {
 					draft.name = 'Jane'
 				})
 			})
@@ -971,7 +962,7 @@ describe('React Hooks - StateRegistry', () => {
 			expect(result.current).toBe(0)
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 1
 				})
 			})
@@ -994,7 +985,7 @@ describe('React Hooks - StateRegistry', () => {
 			const { result } = renderHook(() => useRegistryMachine(registry, 'counter'))
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 10
 				})
 			})
@@ -1010,7 +1001,7 @@ describe('React Hooks - StateRegistry', () => {
 			const initialResult = result.current
 
 			act(() => {
-				(registry.getMachine('user') as UserMachine).mutate(draft => {
+				;(registry.getMachine('user') as UserMachine).mutate(draft => {
 					draft.name = 'Jane'
 				})
 			})
@@ -1034,7 +1025,7 @@ describe('React Hooks - StateRegistry', () => {
 			const { result } = renderHook(() => useRegistryActions(registry))
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 100
 				})
 			})
@@ -1052,7 +1043,7 @@ describe('React Hooks - StateRegistry', () => {
 			const { result } = renderHook(() => useRegistryActions(registry))
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 50
 				})
 			})
@@ -1070,7 +1061,7 @@ describe('React Hooks - StateRegistry', () => {
 			const { result } = renderHook(() => useRegistryActions(registry))
 
 			act(() => {
-				(registry.getMachine('counter') as CounterMachine).mutate(draft => {
+				;(registry.getMachine('counter') as CounterMachine).mutate(draft => {
 					draft.count = 1
 				})
 			})
