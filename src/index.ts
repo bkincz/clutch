@@ -33,7 +33,7 @@ export {
 	useRegistryMachine,
 	useRegistryActions,
 	createRegistryHooks,
-} from './hooks'
+} from './integrations/react/hooks'
 
 /*
  *   TYPE EXPORTS

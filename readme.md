@@ -7,8 +7,16 @@
 
 A TypeScript-first state manager built on Immer with undo/redo, persistence, and debugging tools.
 
+## Installation
+
+```bash
+pnpm add @bkincz/clutch
+```
 ```bash
 npm install @bkincz/clutch
+```
+```bash
+yarn add @bkincz/clutch
 ```
 
 ## Quick Start
@@ -330,12 +338,14 @@ unsubscribe()
 
 ## React Hooks
 
+> **Note:** React hooks are imported from `@bkincz/clutch/react`.
+
 ### `useStateMachine(state)`
 
 Subscribe to entire state.
 
 ```typescript
-import { useStateMachine } from '@bkincz/clutch'
+import { useStateMachine } from '@bkincz/clutch/react'
 
 function Counter() {
   const { state, mutate } = useStateMachine(todoState)
@@ -396,6 +406,8 @@ useLifecycleEvent(state, 'afterMutate', (payload) => {
 Create pre-bound hooks for convenience.
 
 ```typescript
+import { createStateMachineHooks } from '@bkincz/clutch/react'
+
 const hooks = createStateMachineHooks(todoState)
 
 function TodoApp() {
@@ -450,6 +462,8 @@ const { resetAll, forceSaveAll, clearAllHistory, destroyAll } = useRegistryActio
 Create pre-bound hooks for a specific `StateRegistry`.
 
 ```typescript
+import { createRegistryHooks } from '@bkincz/clutch/react'
+
 const hooks = createRegistryHooks(store)
 
 function App() {

@@ -177,6 +177,7 @@ export class StateRegistry<T extends MachineStates> {
 		}
 
 		this.listeners.add(listener)
+
 		this.logger.debug('Store listener subscribed', { totalListeners: this.listeners.size })
 
 		return () => {

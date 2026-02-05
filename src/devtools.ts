@@ -60,12 +60,10 @@ export class DevToolsConnector<T extends object> {
 	}
 
 	private connect(): void {
-		// Check if we're in a browser environment
 		if (typeof window === 'undefined') {
 			return
 		}
 
-		// Check if Redux DevTools Extension exists
 		const ext = (window as any).__REDUX_DEVTOOLS_EXTENSION__ as DevToolsExtension | undefined
 		if (!ext) {
 			console.warn(
@@ -77,12 +75,12 @@ export class DevToolsConnector<T extends object> {
 		try {
 			this.extension = ext.connect({
 				name: this.config.name,
+				instanceId: this.instanceId,
 				maxAge: this.config.maxAge,
 				latency: this.config.latency,
 				features: this.config.features,
 			})
 
-			// Listen for time-travel actions
 			this.unsubscribe = this.extension.subscribe((message: any) => {
 				if (message.type === 'DISPATCH') {
 					this.handleDispatch(message)
@@ -131,7 +129,6 @@ export class DevToolsConnector<T extends object> {
 				case 'JUMP_TO_STATE':
 				case 'JUMP_TO_ACTION':
 					if (message.state) {
-						// Parse with prototype pollution protection
 						const parsed = JSON.parse(message.state, (key, value) => {
 							// Reject dangerous keys that could lead to prototype pollution
 							if (
@@ -147,13 +144,11 @@ export class DevToolsConnector<T extends object> {
 							return value
 						})
 
-						// Validate parsed state
 						if (typeof parsed !== 'object' || parsed === null) {
 							console.error('[Clutch DevTools] Invalid state from DevTools')
 							return
 						}
 
-						// Additional validation: ensure no prototype pollution occurred
 						if (
 							Object.prototype.hasOwnProperty.call(parsed, '__proto__') ||
 							Object.prototype.hasOwnProperty.call(parsed, 'constructor')
@@ -174,13 +169,11 @@ export class DevToolsConnector<T extends object> {
 						const computedStates = nextLiftedState.computedStates
 						const lastState = computedStates[computedStates.length - 1]
 						if (lastState?.state) {
-							// Validate imported state
 							if (typeof lastState.state !== 'object' || lastState.state === null) {
 								console.error('[Clutch DevTools] Invalid imported state')
 								return
 							}
 
-							// Check for prototype pollution in imported state
 							const stateStr = JSON.stringify(lastState.state)
 							if (
 								stateStr.includes('__proto__') ||
