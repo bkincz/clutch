@@ -178,12 +178,6 @@ export class StateRegistry<T extends MachineStates> {
 
 		this.listeners.add(listener)
 
-		try {
-			listener(this.getState())
-		} catch (error) {
-			this.logger.error('Initial listener call failed', error)
-		}
-
 		this.logger.debug('Store listener subscribed', { totalListeners: this.listeners.size })
 
 		return () => {
