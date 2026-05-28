@@ -13,6 +13,7 @@ import {
 	useStateSubscription,
 	useLifecycleEvent,
 	useShallowEqual,
+	useDeferredHydration,
 	createStateMachineHooks,
 	useRegistry,
 	useRegistrySlice,
@@ -41,6 +42,7 @@ class TestStateMachine extends StateMachine<TestState> {
 			persistenceKey: config?.persistenceKey,
 			enablePersistence: config?.enablePersistence ?? false,
 			enableSync: config?.enableSync ?? false,
+			deferredHydration: config?.deferredHydration ?? false,
 		})
 	}
 
@@ -869,6 +871,109 @@ describe('React Hooks - StateMachine', () => {
 
 			expect(result.current.mutate).toBeDefined()
 			expect(result.current.batch).toBeDefined()
+		})
+	})
+
+	describe('deferredHydration (auto-triggered via useStateMachine)', () => {
+		let deferredEngine: TestStateMachine
+
+		beforeEach(() => {
+			vi.mocked(localStorage.getItem).mockReset()
+			deferredEngine = new TestStateMachine({
+				persistenceKey: 'test-deferred',
+				enablePersistence: true,
+				deferredHydration: true,
+			})
+		})
+
+		afterEach(() => {
+			deferredEngine.destroy()
+		})
+
+		it('isHydrated is false before any hook mounts', () => {
+			expect(deferredEngine.isHydrated).toBe(false)
+		})
+
+		it('isHydrated is true for non-deferred machines', () => {
+			expect(engine.isHydrated).toBe(true)
+		})
+
+		it('useStateMachine auto-triggers hydration on mount', async () => {
+			vi.mocked(localStorage.getItem).mockReturnValue(null)
+			renderHook(() => useStateMachine(deferredEngine))
+
+			await waitFor(() => {
+				expect(deferredEngine.isHydrated).toBe(true)
+			})
+		})
+
+		it('useStateSlice auto-triggers hydration on mount', async () => {
+			vi.mocked(localStorage.getItem).mockReturnValue(null)
+			renderHook(() => useStateSlice(deferredEngine, s => s.count))
+
+			await waitFor(() => {
+				expect(deferredEngine.isHydrated).toBe(true)
+			})
+		})
+
+		it('applies persisted state automatically via useStateMachine', async () => {
+			const persistedState = {
+				state: { count: 42, name: 'persisted', nested: { value: 99 } },
+				timestamp: Date.now(),
+				version: '1.0.0',
+			}
+			vi.mocked(localStorage.getItem).mockReturnValue(JSON.stringify(persistedState))
+
+			const { result } = renderHook(() => useStateMachine(deferredEngine))
+
+			await waitFor(() => {
+				expect(result.current.state.count).toBe(42)
+			})
+			expect(result.current.state.name).toBe('persisted')
+		})
+
+		it('hydrateFromPersisted is a no-op on non-deferred machines', () => {
+			const stateBefore = engine.getState()
+			engine.hydrateFromPersisted()
+			expect(engine.getState()).toBe(stateBefore)
+		})
+
+		it('hydrateFromPersisted only runs once (idempotent)', async () => {
+			vi.mocked(localStorage.getItem).mockReturnValue(null)
+			deferredEngine.hydrateFromPersisted()
+			deferredEngine.hydrateFromPersisted()
+			expect(vi.mocked(localStorage.getItem).mock.calls.length).toBe(1)
+		})
+	})
+
+	describe('useDeferredHydration (status hook)', () => {
+		let deferredEngine: TestStateMachine
+
+		beforeEach(() => {
+			vi.mocked(localStorage.getItem).mockReset()
+			deferredEngine = new TestStateMachine({
+				persistenceKey: 'test-deferred',
+				enablePersistence: true,
+				deferredHydration: true,
+			})
+		})
+
+		afterEach(() => {
+			deferredEngine.destroy()
+		})
+
+		it('reflects isHydrated = true after mount', async () => {
+			vi.mocked(localStorage.getItem).mockReturnValue(null)
+			const { result } = renderHook(() => useDeferredHydration(deferredEngine))
+
+			await waitFor(() => {
+				expect(result.current.isHydrated).toBe(true)
+			})
+		})
+
+		it('returns isHydrated = true immediately for non-deferred machines', () => {
+			const { result } = renderHook(() => useDeferredHydration(engine))
+			expect(result.current.isHydrated).toBe(true)
 		})
 	})
 })

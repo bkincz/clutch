@@ -36,6 +36,10 @@ export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 	const getServerSnapshot = useCallback(() => engine.getState(), [engine])
 	const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 
+	useEffect(() => {
+		engine.hydrateFromPersisted()
+	}, [engine])
+
 	const mutate = useCallback(
 		(recipe: (draft: Draft<T>) => void, description?: string) => {
 			engine.mutate(recipe, description)
@@ -106,6 +110,10 @@ export function useStateSlice<T extends object, TSelected>(
 	const getServerSnapshot = useCallback(() => {
 		const currentState = engine.getState()
 		return selectorRef.current(currentState)
+	}, [engine])
+
+	useEffect(() => {
+		engine.hydrateFromPersisted()
 	}, [engine])
 
 	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
@@ -193,6 +201,20 @@ export function useStateHistory<T extends object>(engine: StateMachine<T>) {
 		redo,
 		clearHistory,
 	}
+}
+
+/**
+ * Returns reactive hydration status for a machine configured with `deferredHydration: true`.
+ */
+export function useDeferredHydration<T extends object>(engine: StateMachine<T>) {
+	const [isHydrated, setIsHydrated] = useState(() => engine.isHydrated)
+
+	useEffect(() => {
+		engine.hydrateFromPersisted()
+		setIsHydrated(engine.isHydrated)
+	}, [engine])
+
+	return { isHydrated }
 }
 
 /**

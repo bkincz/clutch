@@ -27,6 +27,7 @@ export {
 	useStateSubscription,
 	useShallowEqual,
 	createStateMachineHooks,
+	useDeferredHydration,
 	useLifecycleEvent,
 	useRegistry,
 	useRegistrySlice,

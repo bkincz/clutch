@@ -336,6 +336,46 @@ unsubscribe()
 - `error` - When a mutation or persistence operation fails
 - `destroy` - Before the state machine is cleaned up
 
+### SSR / Deferred Hydration
+
+Prevent hydration mismatches in Next.js, Remix, and other SSR frameworks.
+
+Without deferred hydration, the machine loads localStorage in its constructor — on the server there is no localStorage, so the server renders `initialState`, but the client immediately hydrates with persisted state, causing a React mismatch error.
+
+Set `deferredHydration: true` to skip localStorage in the constructor. `useStateMachine` and `useStateSlice` will automatically load and apply persisted state on first client mount.
+
+```typescript
+class CartMachine extends StateMachine<CartState> {
+  constructor() {
+    super({
+      initialState: { items: [] },
+      persistenceKey: 'cart',
+      deferredHydration: true   // skip localStorage in constructor
+    })
+  }
+}
+```
+
+```tsx
+// No extra wiring — hydration is automatic
+function Cart() {
+  const { state, mutate } = useStateMachine(cartMachine)
+  return <div>{state.items.length} items</div>
+}
+```
+
+If you need to gate UI on hydration completion (e.g. to avoid a flash of stale state), use `useDeferredHydration`:
+
+```tsx
+function App() {
+  const { isHydrated } = useDeferredHydration(cartMachine)
+  if (!isHydrated) return <Skeleton />
+  return <Cart />
+}
+```
+
+> `isHydrated` is always `true` for machines without `deferredHydration: true`.
+
 ## React Hooks
 
 > **Note:** React hooks are imported from `@bkincz/clutch/react`.
@@ -389,6 +429,14 @@ Handle persistence operations.
 
 ```typescript
 const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(state)
+```
+
+### `useDeferredHydration(state)`
+
+Returns reactive hydration status for a machine configured with `deferredHydration: true`. Use this when you need to conditionally render based on whether persisted state has been applied. Hydration itself is automatic — this hook is optional.
+
+```typescript
+const { isHydrated } = useDeferredHydration(cartMachine)
 ```
 
 ### `useLifecycleEvent(state, event, listener)`
@@ -501,6 +549,9 @@ interface StateConfig<T> {
   // Sync
   enableSync?: boolean | SyncConfig
 
+  // SSR
+  deferredHydration?: boolean          // skip localStorage in constructor, default: false
+
   // Validation & Debugging
   validateState?: (state: T) => boolean
   enableLogging?: boolean              // default: false
@@ -533,6 +584,8 @@ on(event, listener): () => void        // Subscribe to events
 forceSave(): Promise<void>             // Immediately save
 hasUnsavedChanges(): boolean           // Check unsaved changes
 loadFromServerManually(): Promise<boolean> // Manual server load
+hydrateFromPersisted(): void           // Load localStorage (deferred hydration only)
+isHydrated: boolean                    // false until hydrateFromPersisted() runs
 ```
 
 ### History Methods
