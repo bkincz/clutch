@@ -77,6 +77,7 @@ export interface StateConfig<T extends object> {
 	persistenceFilter?: PersistenceFilter<T>
 	enableDevTools?: boolean | DevToolsConfig
 	enableSync?: boolean | SyncConfig
+	deferredHydration?: boolean
 }
 
 interface InternalStateConfig<T extends object> {
@@ -90,6 +91,7 @@ interface InternalStateConfig<T extends object> {
 	validateState: (state: T) => boolean
 	middleware: Middleware<T>[]
 	persistenceFilter: PersistenceFilter<T> | null
+	deferredHydration: boolean
 }
 
 export interface StateSnapshot {
@@ -228,6 +230,7 @@ export abstract class StateMachine<T extends object> {
 	protected isDirty = false
 	protected autoSaveTimer: ReturnType<typeof setInterval> | null = null
 	protected isDestroyed = false
+	protected _hydrated = false
 	protected logger: ReturnType<typeof createLogger>
 	protected debouncedNotify: () => void
 	protected eventListeners: Map<
@@ -251,13 +254,15 @@ export abstract class StateMachine<T extends object> {
 			validateState: config.validateState ?? (() => true),
 			middleware: config.middleware ?? [],
 			persistenceFilter: config.persistenceFilter ?? null,
+			deferredHydration: config.deferredHydration ?? false,
 		}
 
 		this.logger = createLogger(this.config.enableLogging)
 		this.debouncedNotify = debounce(() => this.notifyListeners(), NOTIFICATION_DEBOUNCE_MS)
 
 		try {
-			this.state = this.loadPersistedState() || config.initialState
+			this.state =
+				(!this.config.deferredHydration && this.loadPersistedState()) || config.initialState
 			this.validateCurrentState()
 		} catch (error) {
 			this.logger.warn('Failed to load persisted state, using initial state', error)
@@ -267,7 +272,7 @@ export abstract class StateMachine<T extends object> {
 			this.validateCurrentState()
 		}
 
-		if (this.config.enableAutoSave) {
+		if (!this.config.deferredHydration && this.config.enableAutoSave) {
 			this.startAutoSave()
 		}
 
@@ -291,6 +296,38 @@ export abstract class StateMachine<T extends object> {
 	protected async saveToServer(_state: T): Promise<void> {}
 	protected async loadFromServer(): Promise<T | null> {
 		return null
+	}
+
+	public get isHydrated(): boolean {
+		return !this.config.deferredHydration || this._hydrated
+	}
+
+	/**
+	 * Load and apply persisted state from localStorage. No-op if deferredHydration is not enabled
+	 * or already called.
+	 */
+	public hydrateFromPersisted(): void {
+		if (!this.config.deferredHydration || this._hydrated || this.isDestroyed) {
+			return
+		}
+
+		this._hydrated = true
+
+		try {
+			const persisted = this.loadPersistedState()
+			if (persisted) {
+				this.state = persisted
+				this.validateCurrentState()
+				this.debouncedNotify()
+				this.logger.debug('Deferred hydration applied persisted state')
+			}
+		} catch (error) {
+			this.logger.warn('Deferred hydration failed, keeping current state', error)
+		}
+
+		if (this.config.enableAutoSave && !this.autoSaveTimer) {
+			this.startAutoSave()
+		}
 	}
 
 	/*
@@ -1101,6 +1138,9 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private persistToLocal(): void {
+		if (typeof window === 'undefined') {
+			return
+		}
 		if (!this.config.enablePersistence || !this.config.persistenceKey) {
 			return
 		}
@@ -1156,6 +1196,9 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private loadPersistedState(): T | null {
+		if (typeof window === 'undefined') {
+			return null
+		}
 		if (!this.config.enablePersistence || !this.config.persistenceKey) {
 			return null
 		}
@@ -1220,6 +1263,9 @@ export abstract class StateMachine<T extends object> {
 	 * AUTO SAVE
 	 */
 	private startAutoSave(): void {
+		if (typeof window === 'undefined') {
+			return
+		}
 		if (!this.config.enableAutoSave) {
 			return
 		}

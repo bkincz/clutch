@@ -98,11 +98,11 @@ describe('Package Exports', () => {
 	})
 
 	describe('Export consistency', () => {
-		it('should have 17 hook exports from /react entry', async () => {
+		it('should have 18 hook exports from /react entry', async () => {
 			const reactExports = await import('../integrations/react')
 			const exportKeys = Object.keys(reactExports)
 
-			expect(exportKeys.length).toBe(17)
+			expect(exportKeys.length).toBe(18)
 		})
 	})
 })
