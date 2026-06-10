@@ -22,14 +22,14 @@ yarn add @bkincz/clutch
 ## Quick Start
 
 ```typescript
-import { StateMachine } from '@bkincz/clutch'
+import { createStateMachine } from '@bkincz/clutch'
 
 interface AppState {
   count: number
   todos: string[]
 }
 
-const state = new StateMachine({
+const state = createStateMachine<AppState>({
   initialState: { count: 0, todos: [] }
 })
 
@@ -44,11 +44,13 @@ state.undo()
 state.redo()
 ```
 
+Prefer classes? `new StateMachine({ ... })` works too. You only need to subclass when you want to override the server persistence hooks.
+
 ## Core Features
 
 ### Immutable Updates
 
-Powered by Immer - write simple mutations, get immutable state.
+Powered by Immer. Write simple mutations, get immutable state back.
 
 ```typescript
 // Instead of this
@@ -97,10 +99,10 @@ state.batch([
 Automatic localStorage backup with optional server sync.
 
 ```typescript
-const state = new StateMachine({
+const state = createStateMachine({
   initialState: { count: 0 },
   persistenceKey: 'my-app',
-  autoSaveInterval: 5 // minutes
+  autoSaveIntervalMs: 5 * 60 * 1000 // auto-save every 5 minutes
 })
 
 // Optional: add server persistence
@@ -118,6 +120,8 @@ class MyState extends StateMachine<AppState> {
   }
 }
 ```
+
+> `saveToServer`/`loadFromServer` are for periodic backup and restore. If you want *live* state sync between clients, that's what [Server Sync (WebSocket)](#server-sync-websocket) is for.
 
 ## Advanced Features
 
@@ -149,11 +153,7 @@ const state = new StateMachine({
 })
 ```
 
-Middleware executes in order, like Express.js:
-1. First middleware runs "before" code
-2. Calls `next(draft)` to pass control to next middleware
-3. After all middleware, the mutation executes
-4. Control returns back through middleware "after" code
+Middleware runs in order, Express style. Whatever you do before `next(draft)` happens before the mutation, whatever comes after runs on the way back out.
 
 ### Selective Persistence
 
@@ -216,15 +216,9 @@ const state = new StateMachine({
     }
   }
 })
-
-// Now open Redux DevTools extension to see:
-// - All mutations with descriptions
-// - State at each step
-// - Time-travel through history
-// - Import/export state
 ```
 
-Gracefully degrades when DevTools extension is not installed.
+If the extension isn't installed, nothing breaks.
 
 ### StateRegistry (Multi-Machine Management)
 
@@ -297,13 +291,69 @@ const state = new StateMachine({
     mergeStrategy: 'patches'      // 'patches' or 'latest'
   }
 })
-
-// Now changes in one tab instantly appear in all other tabs
-// - 'patches': Send only the changes (more efficient)
-// - 'latest': Send full state (simpler, more reliable)
 ```
 
-Works automatically in the background. Gracefully degrades when BroadcastChannel is not supported.
+Changes in one tab show up in the others. `'patches'` sends just the diff, `'latest'` sends the whole state. Runs in the background and quietly does nothing in environments without BroadcastChannel.
+
+> **Note:** With `deferredHydration: true`, sync starts when `hydrateFromPersisted()` is
+> called rather than at construction, so remote updates can never overwrite persisted state
+> before it has been loaded.
+
+The transport is pluggable. Pass any `SyncTransport` implementation to route sync
+messages somewhere else:
+
+```typescript
+import type { SyncTransport } from '@bkincz/clutch'
+
+const state = new StateMachine({
+  initialState: { count: 0 },
+  enableSync: { transport: myCustomTransport }, // defaults to BroadcastChannelTransport
+})
+```
+
+### Server Sync (WebSocket)
+
+Want sync across actual machines, not just tabs? Point Clutch at a WebSocket server.
+It lives in its own `@bkincz/clutch/sync-ws` entry, so it costs nothing unless you import it.
+
+```typescript
+import { StateMachine } from '@bkincz/clutch'
+import { WebSocketTransport } from '@bkincz/clutch/sync-ws'
+
+const state = new StateMachine({
+  initialState: { count: 0 },
+  enableSync: {
+    mergeStrategy: 'patches',
+    transport: new WebSocketTransport({
+      url: 'wss://example.com/sync',
+      getAuthToken: () => myAuth.getToken(), // optional, sync or async
+      onError: err => reportError(err),      // operational errors (reconnect gave up, queue overflow)
+    }),
+  },
+})
+```
+
+| Option                | Default   | Description                                                     |
+| --------------------- | --------- | --------------------------------------------------------------- |
+| `url`                 | -         | WebSocket server URL                                            |
+| `protocols`           | -         | WebSocket subprotocols                                          |
+| `webSocketCtor`       | global    | Custom constructor, pass `require('ws')` in Node                |
+| `reconnect`           | `{}`      | `false` to disable, or `{ maxRetries, baseDelayMs, maxDelayMs }` |
+| `heartbeatIntervalMs` | `30000`   | Ping interval, `0` disables                                     |
+| `heartbeatTimeoutMs`  | `10000`   | Close and reconnect if no reply within this window              |
+| `maxQueueSize`        | `100`     | Outgoing messages queued while offline (drop-oldest)            |
+| `getAuthToken`        | -         | Token provider, sync or async                                   |
+| `authMode`            | `'query'` | `'query'` appends `?token=...`, `'message'` sends an auth frame |
+| `onError`             | -         | Operational error callback                                      |
+
+Reconnection with backoff, heartbeats, and offline queueing are all handled for you.
+Your server just needs to stamp each message with an incrementing version and broadcast
+it to everyone, including the sender. That's about 30 lines in any language, and it never
+has to understand your state shape. Full wire spec and reference pseudocode in
+[docs/sync-protocol.md](docs/sync-protocol.md).
+
+> **Heads up:** server-synced state has to be JSON-serializable. `Date`/`Map`/`Set`
+> survive cross-tab structured clone but not JSON.
 
 ### Lifecycle Events
 
@@ -340,9 +390,7 @@ unsubscribe()
 
 Prevent hydration mismatches in Next.js, Remix, and other SSR frameworks.
 
-Without deferred hydration, the machine loads localStorage in its constructor — on the server there is no localStorage, so the server renders `initialState`, but the client immediately hydrates with persisted state, causing a React mismatch error.
-
-Set `deferredHydration: true` to skip localStorage in the constructor. `useStateMachine` and `useStateSlice` will automatically load and apply persisted state on first client mount.
+The server renders `initialState`, the client hydrates with whatever was in localStorage, and React complains about the mismatch. Set `deferredHydration: true` and the machine waits until first client mount to load persisted state. `useStateMachine` and `useStateSlice` handle it automatically.
 
 ```typescript
 class CartMachine extends StateMachine<CartState> {
@@ -357,14 +405,14 @@ class CartMachine extends StateMachine<CartState> {
 ```
 
 ```tsx
-// No extra wiring — hydration is automatic
+// No extra wiring needed, hydration is automatic
 function Cart() {
   const { state, mutate } = useStateMachine(cartMachine)
   return <div>{state.items.length} items</div>
 }
 ```
 
-If you need to gate UI on hydration completion (e.g. to avoid a flash of stale state), use `useDeferredHydration`:
+Want to avoid a flash of stale state? Gate your UI with `useDeferredHydration`:
 
 ```tsx
 function App() {
@@ -433,7 +481,7 @@ const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(state)
 
 ### `useDeferredHydration(state)`
 
-Returns reactive hydration status for a machine configured with `deferredHydration: true`. Use this when you need to conditionally render based on whether persisted state has been applied. Hydration itself is automatic — this hook is optional.
+Reactive hydration status for machines with `deferredHydration: true`. Hydration itself is automatic, this hook is just for gating UI on it.
 
 ```typescript
 const { isHydrated } = useDeferredHydration(cartMachine)
@@ -534,7 +582,7 @@ interface StateConfig<T> {
   persistenceKey?: string              // localStorage key
   persistenceFilter?: PersistenceFilter<T> // exclude/include/custom
   enablePersistence?: boolean          // default: true
-  autoSaveInterval?: number            // minutes, default: 5
+  autoSaveIntervalMs?: number          // default: 300000 (5 minutes)
   enableAutoSave?: boolean             // default: true
 
   // History
@@ -623,12 +671,11 @@ destroyAll()                           // Destroy all machines
 
 ## Performance
 
-- **Lightweight**: ~20KB minified
-- **Fast mutations**: < 1ms average overhead
-- **Efficient undo/redo**: Patch-based storage
-- **Optimized rendering**: Fine-grained subscriptions
-- **Lazy initialization**: Zero-cost for unused features
-- **Tree-shakeable**: Only bundle what you use
+- Core is under 10KB brotlied, Immer included
+- Undo/redo stores patches, not full state snapshots
+- Slice subscriptions only re-render when the selected value actually changes
+- localStorage writes are debounced instead of firing on every mutation
+- React, WebSocket sync, and DevTools cost nothing unless you use them
 
 ## TypeScript
 

@@ -179,14 +179,9 @@ describe('Middleware', () => {
 		expect(machine.getState().count).toBe(3)
 	})
 
-	it('should handle middleware that returns promises', () => {
-		// Note: Middleware can be async, but mutate() is synchronous
-		// The middleware promise doesn't block the mutation
+	it('should not block mutation when middleware fires off async work', () => {
 		const asyncMiddleware: Middleware<TestState> = (ctx, next, draft) => {
-			// Async work can happen but doesn't block
-			Promise.resolve().then(() => {
-				// Async cleanup or logging
-			})
+			Promise.resolve().then(() => {})
 			next(draft)
 		}
 

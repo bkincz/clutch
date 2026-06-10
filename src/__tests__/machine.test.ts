@@ -125,20 +125,19 @@ describe('StateMachine', () => {
 	})
 
 	describe('subscriptions', () => {
-		it('should notify subscribers on state change', async () => {
+		it('should notify subscribers on state change', () => {
 			const listener = vi.fn()
 			const unsubscribe = stateMachine.subscribe(listener)
 
-			expect(listener).toHaveBeenCalledWith(stateMachine.getState())
+			// Subscribing alone does not invoke the listener
+			expect(listener).not.toHaveBeenCalled()
 
 			stateMachine.mutate(draft => {
 				draft.count = 5
 			})
 
-			// Wait for debounced notification
-			await new Promise(resolve => setTimeout(resolve, 20))
-
-			expect(listener).toHaveBeenCalledTimes(2)
+			// Notification is synchronous
+			expect(listener).toHaveBeenCalledTimes(1)
 			expect(listener).toHaveBeenLastCalledWith(expect.objectContaining({ count: 5 }))
 
 			unsubscribe()
@@ -146,7 +145,7 @@ describe('StateMachine', () => {
 				draft.count = 10
 			})
 
-			expect(listener).toHaveBeenCalledTimes(2)
+			expect(listener).toHaveBeenCalledTimes(1)
 		})
 
 		it('should handle subscriber errors gracefully', () => {
@@ -675,7 +674,6 @@ describe('StateMachine', () => {
 					eventListeners: Map<string, Set<unknown>> | null
 				}
 
-				// Add listeners
 				const unsub1 = stateMachine.on('afterMutate', vi.fn())
 				const unsub2 = stateMachine.on('error', vi.fn())
 

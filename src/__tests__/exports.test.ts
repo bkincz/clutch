@@ -6,6 +6,7 @@ describe('Package Exports', () => {
 			const coreExports = await import('../index')
 
 			expect(coreExports.StateMachine).toBeDefined()
+			expect(coreExports.createStateMachine).toBeDefined()
 			expect(coreExports.StateMachineError).toBeDefined()
 			expect(coreExports.StateValidationError).toBeDefined()
 			expect(coreExports.StatePersistenceError).toBeDefined()
@@ -24,6 +25,12 @@ describe('Package Exports', () => {
 			expect(coreExports.StateSyncManager).toBeDefined()
 		})
 
+		it('should export the BroadcastChannelTransport', async () => {
+			const coreExports = await import('../index')
+
+			expect(coreExports.BroadcastChannelTransport).toBeDefined()
+		})
+
 		it('should export core types', async () => {
 			const _typeTest: import('../index').StateConfig<{ count: number }> = {
 				initialState: { count: 0 },
@@ -33,26 +40,13 @@ describe('Package Exports', () => {
 		})
 	})
 
-	describe('React hooks from main entry (deprecated)', () => {
-		it('should still export React hooks for backward compatibility', async () => {
+	describe('React-free main entry', () => {
+		it('should NOT export React hooks from the main entry', async () => {
 			const coreExports = await import('../index')
 
-			expect(coreExports.useStateMachine).toBeDefined()
-			expect(coreExports.useStateSlice).toBeDefined()
-			expect(coreExports.useStateActions).toBeDefined()
-			expect(coreExports.useStateHistory).toBeDefined()
-			expect(coreExports.useStatePersist).toBeDefined()
-			expect(coreExports.useLifecycleEvent).toBeDefined()
-			expect(coreExports.useOptimisticUpdate).toBeDefined()
-			expect(coreExports.useDebouncedStateUpdate).toBeDefined()
-			expect(coreExports.useStateSubscription).toBeDefined()
-			expect(coreExports.useShallowEqual).toBeDefined()
-			expect(coreExports.useRegistry).toBeDefined()
-			expect(coreExports.useRegistrySlice).toBeDefined()
-			expect(coreExports.useRegistryMachine).toBeDefined()
-			expect(coreExports.useRegistryActions).toBeDefined()
-			expect(coreExports.createStateMachineHooks).toBeDefined()
-			expect(coreExports.createRegistryHooks).toBeDefined()
+			expect((coreExports as any).useStateMachine).toBeUndefined()
+			expect((coreExports as any).useStateSlice).toBeUndefined()
+			expect((coreExports as any).createStateMachineHooks).toBeUndefined()
 		})
 	})
 
@@ -78,22 +72,27 @@ describe('Package Exports', () => {
 			expect(reactExports.createRegistryHooks).toBeDefined()
 		})
 
-		it('should export the same hooks as main entry', async () => {
-			const coreExports = await import('../index')
-			const reactExports = await import('../integrations/react')
-
-			expect(reactExports.useStateMachine).toBe(coreExports.useStateMachine)
-			expect(reactExports.useStateSlice).toBe(coreExports.useStateSlice)
-			expect(reactExports.useRegistry).toBe(coreExports.useRegistry)
-			expect(reactExports.createStateMachineHooks).toBe(coreExports.createStateMachineHooks)
-		})
-
 		it('should NOT export core classes from /react entry', async () => {
 			const reactExports = await import('../integrations/react')
 
 			expect((reactExports as any).StateMachine).toBeUndefined()
 			expect((reactExports as any).StateRegistry).toBeUndefined()
 			expect((reactExports as any).DevToolsConnector).toBeUndefined()
+		})
+	})
+
+	describe('Sync WS entry', () => {
+		it('should export WebSocketTransport from /sync-ws entry', async () => {
+			const syncWsExports = await import('../transports/websocket')
+
+			expect(syncWsExports.WebSocketTransport).toBeDefined()
+		})
+
+		it('should NOT export core classes from /sync-ws entry', async () => {
+			const syncWsExports = await import('../transports/websocket')
+
+			expect((syncWsExports as any).StateMachine).toBeUndefined()
+			expect((syncWsExports as any).StateSyncManager).toBeUndefined()
 		})
 	})
 

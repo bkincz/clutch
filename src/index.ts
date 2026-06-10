@@ -3,6 +3,7 @@
  ***************************************************************************************************/
 export {
 	StateMachine,
+	createStateMachine,
 	StateMachineError,
 	StateValidationError,
 	StatePersistenceError,
@@ -11,30 +12,9 @@ export {
 export { DevToolsConnector } from './devtools'
 export { StateSyncManager } from './sync'
 export { StateRegistry } from './store'
+export { BroadcastChannelTransport } from './transports/broadcast-channel'
 
-/*
- *   REACT HOOK EXPORTS
- ***************************************************************************************************/
-export {
-	useStateMachine,
-	useStateSlice,
-	useStateActions,
-	useStateHistory,
-	useStatePersist,
-	useStateMachineFull,
-	useOptimisticUpdate,
-	useDebouncedStateUpdate,
-	useStateSubscription,
-	useShallowEqual,
-	createStateMachineHooks,
-	useDeferredHydration,
-	useLifecycleEvent,
-	useRegistry,
-	useRegistrySlice,
-	useRegistryMachine,
-	useRegistryActions,
-	createRegistryHooks,
-} from './integrations/react/hooks'
+// React hooks live in '@bkincz/clutch/react'. The main entry must stay React-free.
 
 /*
  *   TYPE EXPORTS
@@ -59,6 +39,8 @@ export type {
 
 export type { DevToolsConfig } from './devtools'
 export type { SyncConfig } from './sync'
+export type { SyncTransport, TransportStatus } from './transports/types'
+export type { BroadcastChannelTransportConfig } from './transports/broadcast-channel'
 export type {
 	RegistryConfig,
 	MachineStates,

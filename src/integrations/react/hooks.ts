@@ -15,15 +15,12 @@ import { StateRegistry, type CombinedState, type MachineStates } from '../../sto
 /*
  *   TYPES
  ***************************************************************************************************/
-import type { Draft } from 'immer'
+import type { Patch, Draft } from 'immer'
 
 /*
  *   HOOKS
  ***************************************************************************************************/
 
-/**
- * Basic hook to subscribe to a StateMachine instance
- */
 export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
@@ -61,9 +58,6 @@ export function useStateMachine<T extends object>(engine: StateMachine<T>) {
 	}
 }
 
-/**
- * Hook to subscribe to a specific slice of state with a selector function.
- */
 export function useStateSlice<T extends object, TSelected>(
 	engine: StateMachine<T>,
 	selector: (state: T) => TSelected,
@@ -79,49 +73,34 @@ export function useStateSlice<T extends object, TSelected>(
 
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
-			return engine.subscribe((state: T) => {
-				const newSelected = selectorRef.current(state)
-
-				if (
-					!hasSelectedRef.current ||
-					!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
-				) {
-					selectedRef.current = newSelected
-					hasSelectedRef.current = true
-					onStoreChange()
-				}
-			})
+			return engine.subscribe(onStoreChange)
 		},
 		[engine]
 	)
 
+	// Recompute on every read so a changed selector never serves stale values,
+	// and reuse the previous reference when equal so React can skip the re-render
 	const getSnapshot = useCallback(() => {
-		const currentState = engine.getState()
-		const selected = selectorRef.current(currentState)
+		const newSelected = selectorRef.current(engine.getState())
 
-		if (!hasSelectedRef.current) {
-			selectedRef.current = selected
+		if (
+			!hasSelectedRef.current ||
+			!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
+		) {
+			selectedRef.current = newSelected
 			hasSelectedRef.current = true
 		}
 
 		return selectedRef.current as TSelected
 	}, [engine])
 
-	const getServerSnapshot = useCallback(() => {
-		const currentState = engine.getState()
-		return selectorRef.current(currentState)
-	}, [engine])
-
 	useEffect(() => {
 		engine.hydrateFromPersisted()
 	}, [engine])
 
-	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/**
- * Hook that provides StateMachine actions/methods
- */
 export function useStateActions<T extends object>(engine: StateMachine<T>) {
 	const mutate = useCallback(
 		(recipe: (draft: Draft<T>) => void, description?: string) => {
@@ -168,9 +147,6 @@ export function useStateActions<T extends object>(engine: StateMachine<T>) {
 	}
 }
 
-/**
- * Hook specifically for undo/redo functionality
- */
 export function useStateHistory<T extends object>(engine: StateMachine<T>) {
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
@@ -203,9 +179,6 @@ export function useStateHistory<T extends object>(engine: StateMachine<T>) {
 	}
 }
 
-/**
- * Returns reactive hydration status for a machine configured with `deferredHydration: true`.
- */
 export function useDeferredHydration<T extends object>(engine: StateMachine<T>) {
 	const [isHydrated, setIsHydrated] = useState(() => engine.isHydrated)
 
@@ -217,9 +190,6 @@ export function useDeferredHydration<T extends object>(engine: StateMachine<T>) 
 	return { isHydrated }
 }
 
-/**
- * Hook for managing save/load state and persistence
- */
 export function useStatePersist<T extends object>(engine: StateMachine<T>) {
 	const [isSaving, setIsSaving] = useState(false)
 	const [isLoading, setIsLoading] = useState(false)
@@ -303,9 +273,6 @@ export function useStatePersist<T extends object>(engine: StateMachine<T>) {
 	}
 }
 
-/**
- * Comprehensive hook that combines all StateMachine functionality
- */
 export function useStateMachineFull<T extends object>(engine: StateMachine<T>) {
 	const { state, mutate, batch } = useStateMachine(engine)
 	const actions = useStateActions(engine)
@@ -322,7 +289,6 @@ export function useStateMachineFull<T extends object>(engine: StateMachine<T>) {
 			historyLength: history.historyLength,
 			currentIndex: history.currentIndex,
 			lastAction: history.lastAction,
-			memoryUsage: history.memoryUsage,
 			undo: history.undo,
 			redo: history.redo,
 			clearHistory: history.clearHistory,
@@ -344,10 +310,6 @@ export function useStateMachineFull<T extends object>(engine: StateMachine<T>) {
 	}
 }
 
-/**
- * Hook for creating optimistic updates with automatic rollback on failure
- * -- Still testing this, I'm not sure if this is a good solution.
- */
 export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
 	const mutateOptimistic = useCallback(
 		async (
@@ -355,27 +317,23 @@ export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
 			serverUpdate: () => Promise<void>,
 			description?: string
 		) => {
-			// Store the current history info before applying optimistic update
-			const historyBeforeUpdate = engine.getHistoryInfo()
-			const targetIndex = historyBeforeUpdate.currentIndex
-
-			// Apply optimistic update
-			engine.mutate(optimisticUpdate, `${description} (optimistic)`)
+			// Rollback reverts exactly this change, so mutations landing in between survive
+			let inversePatches: Patch[] = []
+			const off = engine.on('afterMutate', payload => {
+				inversePatches = payload.inversePatches
+			})
 
 			try {
-				// Attempt server update
-				await serverUpdate()
-				// If successful, the optimistic update stands and we dont need to do anything else
-			} catch (error) {
-				// If failed, undo back to the exact state before the optimistic update
-				// This handles cases where other mutations happened in between
-				const currentInfo = engine.getHistoryInfo()
-				const undoCount = currentInfo.currentIndex - targetIndex
+				engine.mutate(optimisticUpdate, `${description} (optimistic)`)
+			} finally {
+				off()
+			}
 
-				for (let i = 0; i < undoCount; i++) {
-					if (engine.canUndo()) {
-						engine.undo()
-					}
+			try {
+				await serverUpdate()
+			} catch (error) {
+				if (inversePatches.length > 0) {
+					engine.applyPatchSet(inversePatches, `${description} (rollback)`)
 				}
 				throw error
 			}
@@ -386,9 +344,6 @@ export function useOptimisticUpdate<T extends object>(engine: StateMachine<T>) {
 	return { mutateOptimistic }
 }
 
-/**
- * Hook for debounced state updates (useful for search inputs, etc.)
- */
 export function useDebouncedStateUpdate<T extends object>(engine: StateMachine<T>, delay = 300) {
 	const timeoutRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -415,9 +370,6 @@ export function useDebouncedStateUpdate<T extends object>(engine: StateMachine<T
 	return { debouncedMutate }
 }
 
-/**
- * Hook for subscribing to state changes with cleanup on component unmount
- */
 export function useStateSubscription<T extends object>(
 	engine: StateMachine<T>,
 	callback: (state: T) => void,
@@ -430,9 +382,6 @@ export function useStateSubscription<T extends object>(
 	}, [engine, callback, ...deps])
 }
 
-/**
- * Hook for subscribing to lifecycle events (afterMutate, error, destroy)
- */
 export function useLifecycleEvent<T extends object, E extends LifecycleEvent>(
 	engine: StateMachine<T>,
 	event: E,
@@ -446,9 +395,6 @@ export function useLifecycleEvent<T extends object, E extends LifecycleEvent>(
 	}, [engine, event])
 }
 
-/**
- * Utility hook for shallow equality comparison
- */
 export function useShallowEqual<T>(value: T): T {
 	const [state, setState] = useState(value)
 	const prevValueRef = useRef(value)
@@ -492,9 +438,6 @@ export function useShallowEqual<T>(value: T): T {
 	return state
 }
 
-/**
- * Factory function to create typed hooks for a specific StateMachine
- */
 export function createStateMachineHooks<T extends object>(engine: StateMachine<T>) {
 	return {
 		useState: () => useStateMachine(engine),
@@ -521,9 +464,6 @@ export function createStateMachineHooks<T extends object>(engine: StateMachine<T
  *   REGISTRY HOOKS
  ***************************************************************************************************/
 
-/**
- * Hook to subscribe to combined state from a StateRegistry
- */
 export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
@@ -539,9 +479,6 @@ export function useRegistry<T extends MachineStates>(store: StateRegistry<T>) {
 	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
-/**
- * Hook to subscribe to a specific slice of combined store state.
- */
 export function useRegistrySlice<T extends MachineStates, TSelected>(
 	store: StateRegistry<T>,
 	selector: (state: CombinedState<T>) => TSelected,
@@ -557,45 +494,29 @@ export function useRegistrySlice<T extends MachineStates, TSelected>(
 
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => {
-			return store.subscribe((state: CombinedState<T>) => {
-				const newSelected = selectorRef.current(state)
-
-				if (
-					!hasSelectedRef.current ||
-					!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
-				) {
-					selectedRef.current = newSelected
-					hasSelectedRef.current = true
-					onStoreChange()
-				}
-			})
+			return store.subscribe(onStoreChange)
 		},
 		[store]
 	)
 
+	// Same snapshot strategy as useStateSlice
 	const getSnapshot = useCallback(() => {
-		const currentState = store.getState()
-		const selected = selectorRef.current(currentState)
+		const newSelected = selectorRef.current(store.getState())
 
-		if (!hasSelectedRef.current) {
-			selectedRef.current = selected
+		if (
+			!hasSelectedRef.current ||
+			!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
+		) {
+			selectedRef.current = newSelected
 			hasSelectedRef.current = true
 		}
 
 		return selectedRef.current as TSelected
 	}, [store])
 
-	const getServerSnapshot = useCallback(() => {
-		const currentState = store.getState()
-		return selectorRef.current(currentState)
-	}, [store])
-
-	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
-/**
- * Hook to subscribe to a specific machine's state within a store
- */
 export function useRegistryMachine<T extends MachineStates, K extends keyof T>(
 	store: StateRegistry<T>,
 	machineName: K
@@ -619,9 +540,6 @@ export function useRegistryMachine<T extends MachineStates, K extends keyof T>(
 	return useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
 }
 
-/**
- * Hook that provides StateRegistry actions/methods
- */
 export function useRegistryActions<T extends MachineStates>(store: StateRegistry<T>) {
 	const resetAll = useCallback(() => {
 		store.resetAll()
@@ -652,9 +570,6 @@ export function useRegistryActions<T extends MachineStates>(store: StateRegistry
 	}
 }
 
-/**
- * Factory function to create typed hooks for a specific StateRegistry
- */
 export function createRegistryHooks<T extends MachineStates>(store: StateRegistry<T>) {
 	return {
 		useRegistry: () => useRegistry(store),
