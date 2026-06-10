@@ -7,44 +7,24 @@ import { StateMachine, StateMachineError } from './machine'
  *   TYPES
  ***************************************************************************************************/
 
-/**
- * Configuration options for the StateRegistry
- */
 export interface RegistryConfig {
-	/** Enable logging for store operations */
 	enableLogging?: boolean
 }
 
-/**
- * Base constraint for machine registry - maps string keys to object state types
- */
 export type MachineStates = Record<string, object>
 
-/**
- * Maps machine names to their state types
- */
 export type MachineRegistry<T extends MachineStates> = {
 	[K in keyof T]: StateMachine<T[K]>
 }
 
-/**
- * Combined state from all registered machines
- */
 export type CombinedState<T extends MachineStates> = {
 	[K in keyof T]: T[K]
 }
 
-/**
- * Listener function for combined state changes
- */
 export type RegistryListener<T extends MachineStates> = (state: CombinedState<T>) => void
 
-/**
- * Listener function for individual machine state changes
- */
 export type MachineListener<S extends object> = (state: S) => void
 
-// Compact logger
 /* eslint-disable no-console */
 const createLogger = (enabled: boolean) => ({
 	debug: enabled
@@ -95,7 +75,6 @@ export class StateRegistry<T extends MachineStates> {
 
 		this.machines.set(name, machine as unknown as StateMachine<T[keyof T]>)
 
-		// Subscribe to machine changes to invalidate cache and notify listeners
 		const unsubscribe = machine.subscribe(() => {
 			this.cachedState = null
 			this.notifyListeners()
@@ -114,7 +93,6 @@ export class StateRegistry<T extends MachineStates> {
 			return
 		}
 
-		// Unsubscribe from machine
 		const unsubscribe = this.machineUnsubscribers.get(name)
 		if (unsubscribe) {
 			unsubscribe()
@@ -273,13 +251,11 @@ export class StateRegistry<T extends MachineStates> {
 
 		this.logger.info('Destroying all machines and store')
 
-		// Unsubscribe from all machines first
 		this.machineUnsubscribers.forEach(unsubscribe => {
 			unsubscribe()
 		})
 		this.machineUnsubscribers.clear()
 
-		// Destroy all machines
 		this.machines.forEach((machine, name) => {
 			try {
 				machine.destroy()
@@ -289,7 +265,6 @@ export class StateRegistry<T extends MachineStates> {
 			}
 		})
 
-		// Clear store state
 		this.machines.clear()
 		this.listeners.clear()
 		this.isDestroyed = true

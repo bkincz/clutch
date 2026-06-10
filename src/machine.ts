@@ -10,10 +10,10 @@ enablePatches()
 /*
  *   CONSTANTS
  ***************************************************************************************************/
-const DEFAULT_AUTO_SAVE_INTERVAL = 5 // in minutes
+const DEFAULT_AUTO_SAVE_INTERVAL_MS = 5 * 60 * 1000
 const DEFAULT_MAX_HISTORY_SIZE = 50
-const DEFAULT_VERSION = '1.0.0'
-const NOTIFICATION_DEBOUNCE_MS = 16
+const PERSIST_DEBOUNCE_MS = 300
+const MAX_PERSIST_CHARS = 5 * 1024 * 1024
 
 /*
  *   ERROR TYPES
@@ -56,7 +56,7 @@ export type Middleware<T> = (
 	context: MiddlewareContext<T>,
 	next: MiddlewareNext<T>,
 	draft: Draft<T>
-) => void | Promise<void>
+) => void
 
 export type PersistenceFilter<T> = {
 	exclude?: (keyof T)[]
@@ -67,7 +67,7 @@ export type PersistenceFilter<T> = {
 export interface StateConfig<T extends object> {
 	initialState: T
 	persistenceKey?: string
-	autoSaveInterval?: number
+	autoSaveIntervalMs?: number
 	maxHistorySize?: number
 	enablePersistence?: boolean
 	enableAutoSave?: boolean
@@ -83,7 +83,7 @@ export interface StateConfig<T extends object> {
 interface InternalStateConfig<T extends object> {
 	initialState: T
 	persistenceKey: string | null
-	autoSaveInterval: number
+	autoSaveIntervalMs: number
 	maxHistorySize: number
 	enablePersistence: boolean
 	enableAutoSave: boolean
@@ -92,6 +92,7 @@ interface InternalStateConfig<T extends object> {
 	middleware: Middleware<T>[]
 	persistenceFilter: PersistenceFilter<T> | null
 	deferredHydration: boolean
+	enableSync: boolean | SyncConfig
 }
 
 export interface StateSnapshot {
@@ -104,8 +105,6 @@ export interface StateSnapshot {
 export interface PersistedState<T> {
 	state: T
 	timestamp: number
-	version: string
-	checksum?: string
 }
 
 export interface StateHistoryInfo {
@@ -114,7 +113,6 @@ export interface StateHistoryInfo {
 	historyLength: number
 	currentIndex: number
 	lastAction: string | null
-	memoryUsage: number
 }
 
 /*
@@ -151,7 +149,6 @@ export type LifecycleListener<T, E extends LifecycleEvent> = (
 	payload: LifecyclePayloadMap<T>[E]
 ) => void
 
-// Compact logger - will be optimized out in production builds
 /* eslint-disable no-console */
 const createLogger = (enabled: boolean) => ({
 	debug: enabled
@@ -170,58 +167,9 @@ const createLogger = (enabled: boolean) => ({
 /* eslint-enable no-console */
 
 /*
- *   FUNCTIONS
- ***************************************************************************************************/
-function debounce<T extends (...args: unknown[]) => void>(func: T, wait: number): T {
-	let timeout: ReturnType<typeof setTimeout>
-	return ((...args: Parameters<T>) => {
-		clearTimeout(timeout)
-		timeout = setTimeout(() => func(...args), wait)
-	}) as T
-}
-
-// Compact utility functions
-const calculateMemoryUsage = (data: unknown): number => {
-	try {
-		return new Blob([JSON.stringify(data)]).size
-	} catch {
-		return 0
-	}
-}
-
-const generateChecksum = async (data: unknown): Promise<string> => {
-	try {
-		const str = JSON.stringify(data)
-
-		// Use Web Crypto API if available (SHA-256)
-		if (typeof crypto !== 'undefined' && crypto.subtle) {
-			try {
-				const encoder = new TextEncoder()
-				const dataBuffer = encoder.encode(str)
-				const hashBuffer = await crypto.subtle.digest('SHA-256', dataBuffer)
-				const hashArray = Array.from(new Uint8Array(hashBuffer))
-				return hashArray.map(b => b.toString(16).padStart(2, '0')).join('')
-			} catch {
-				// Fall through to fallback if crypto fails
-			}
-		}
-
-		// Fallback: Better non-cryptographic hash (djb2)
-		let hash = 5381
-		for (let i = 0; i < str.length; i++) {
-			hash = (hash << 5) + hash + str.charCodeAt(i)
-		}
-		return Math.abs(hash).toString(36)
-	} catch {
-		// Catch: If all else, ggwp no checksum.
-		return ''
-	}
-}
-
-/*
  *   STATE MACHINE
  ***************************************************************************************************/
-export abstract class StateMachine<T extends object> {
+export class StateMachine<T extends object> {
 	protected state: T
 	protected config: InternalStateConfig<T>
 	protected listeners: Set<(state: T) => void> = new Set()
@@ -232,7 +180,9 @@ export abstract class StateMachine<T extends object> {
 	protected isDestroyed = false
 	protected _hydrated = false
 	protected logger: ReturnType<typeof createLogger>
-	protected debouncedNotify: () => void
+	private persistTimer: ReturnType<typeof setTimeout> | null = null
+	private pagehideHandler: (() => void) | null = null
+	private historyInfoCache: StateHistoryInfo | null = null
 	protected eventListeners: Map<
 		LifecycleEvent,
 		Set<LifecycleListener<T, LifecycleEvent>>
@@ -246,7 +196,7 @@ export abstract class StateMachine<T extends object> {
 		this.config = {
 			initialState: config.initialState,
 			persistenceKey: config.persistenceKey || null,
-			autoSaveInterval: config.autoSaveInterval ?? DEFAULT_AUTO_SAVE_INTERVAL,
+			autoSaveIntervalMs: config.autoSaveIntervalMs ?? DEFAULT_AUTO_SAVE_INTERVAL_MS,
 			maxHistorySize: config.maxHistorySize ?? DEFAULT_MAX_HISTORY_SIZE,
 			enablePersistence: config.enablePersistence ?? true,
 			enableAutoSave: config.enableAutoSave ?? true,
@@ -255,10 +205,19 @@ export abstract class StateMachine<T extends object> {
 			middleware: config.middleware ?? [],
 			persistenceFilter: config.persistenceFilter ?? null,
 			deferredHydration: config.deferredHydration ?? false,
+			enableSync: config.enableSync ?? false,
 		}
 
 		this.logger = createLogger(this.config.enableLogging)
-		this.debouncedNotify = debounce(() => this.notifyListeners(), NOTIFICATION_DEBOUNCE_MS)
+
+		if (
+			typeof window !== 'undefined' &&
+			this.config.enablePersistence &&
+			this.config.persistenceKey
+		) {
+			this.pagehideHandler = () => this.flushPersist()
+			window.addEventListener('pagehide', this.pagehideHandler)
+		}
 
 		try {
 			this.state =
@@ -267,8 +226,6 @@ export abstract class StateMachine<T extends object> {
 		} catch (error) {
 			this.logger.warn('Failed to load persisted state, using initial state', error)
 			this.state = config.initialState
-
-			// Validate the fallback initial state
 			this.validateCurrentState()
 		}
 
@@ -276,19 +233,19 @@ export abstract class StateMachine<T extends object> {
 			this.startAutoSave()
 		}
 
-		// Initialize DevTools if enabled
 		if (config.enableDevTools) {
 			this.initializeDevTools(config.enableDevTools)
 		}
 
-		// Initialize Sync if enabled
-		if (config.enableSync) {
+		// With deferredHydration, sync starts in hydrateFromPersisted() so a remote
+		// full-sync response can't overwrite persisted state before it's read
+		if (config.enableSync && !this.config.deferredHydration) {
 			this.initializeSync(config.enableSync)
 		}
 
 		this.logger.info('StateMachine initialized', {
 			persistenceKey: this.config.persistenceKey,
-			autoSaveInterval: this.config.autoSaveInterval,
+			autoSaveIntervalMs: this.config.autoSaveIntervalMs,
 			maxHistorySize: this.config.maxHistorySize,
 		})
 	}
@@ -302,10 +259,6 @@ export abstract class StateMachine<T extends object> {
 		return !this.config.deferredHydration || this._hydrated
 	}
 
-	/**
-	 * Load and apply persisted state from localStorage. No-op if deferredHydration is not enabled
-	 * or already called.
-	 */
 	public hydrateFromPersisted(): void {
 		if (!this.config.deferredHydration || this._hydrated || this.isDestroyed) {
 			return
@@ -318,7 +271,7 @@ export abstract class StateMachine<T extends object> {
 			if (persisted) {
 				this.state = persisted
 				this.validateCurrentState()
-				this.debouncedNotify()
+				this.notifyListeners()
 				this.logger.debug('Deferred hydration applied persisted state')
 			}
 		} catch (error) {
@@ -327,6 +280,10 @@ export abstract class StateMachine<T extends object> {
 
 		if (this.config.enableAutoSave && !this.autoSaveTimer) {
 			this.startAutoSave()
+		}
+
+		if (this.config.enableSync && !this.syncManager) {
+			this.initializeSync(this.config.enableSync)
 		}
 	}
 
@@ -351,12 +308,6 @@ export abstract class StateMachine<T extends object> {
 
 		this.listeners.add(listener)
 
-		try {
-			listener(this.state)
-		} catch (error) {
-			this.logger.error('Initial listener call failed', error)
-		}
-
 		this.logger.debug('Listener subscribed', {
 			totalListeners: this.listeners.size,
 		})
@@ -377,7 +328,6 @@ export abstract class StateMachine<T extends object> {
 		}
 
 		try {
-			// Execute middleware chain
 			const finalRecipe = this.composeMiddleware(recipe, description, 'mutate')
 
 			let patches: Patch[] = []
@@ -391,30 +341,7 @@ export abstract class StateMachine<T extends object> {
 			if (patches.length > 0) {
 				this.validateState(nextState)
 				this.saveToHistory(patches, inversePatches, description)
-				this.setState(nextState)
-
-				this.emit('afterMutate', {
-					state: nextState,
-					patches,
-					inversePatches,
-					description,
-					operation: 'mutate',
-				})
-
-				// Send to DevTools
-				if (this.devtools) {
-					this.devtools.send(description || 'State Mutated', nextState, patches)
-				}
-
-				// Broadcast to other tabs
-				if (this.syncManager) {
-					this.syncManager.broadcastChange(
-						nextState,
-						patches,
-						inversePatches,
-						description
-					)
-				}
+				this.commit(nextState, patches, inversePatches, description, 'mutate')
 
 				this.logger.debug('State mutated', {
 					description,
@@ -430,7 +357,6 @@ export abstract class StateMachine<T extends object> {
 				operation: 'mutate',
 			})
 
-			// Re-throw validation errors without wrapping them
 			if (error instanceof StateValidationError) {
 				throw error
 			}
@@ -484,30 +410,7 @@ export abstract class StateMachine<T extends object> {
 			if (allPatches.length > 0) {
 				this.validateState(finalState)
 				this.saveToHistory(allPatches, allInversePatches, description || 'Batch operation')
-				this.setState(finalState)
-
-				this.emit('afterMutate', {
-					state: finalState,
-					patches: allPatches,
-					inversePatches: allInversePatches,
-					description,
-					operation: 'batch',
-				})
-
-				// Send to DevTools
-				if (this.devtools) {
-					this.devtools.send(description || 'Batch Operation', finalState, allPatches)
-				}
-
-				// Broadcast to other tabs
-				if (this.syncManager) {
-					this.syncManager.broadcastChange(
-						finalState,
-						allPatches,
-						allInversePatches,
-						description
-					)
-				}
+				this.commit(finalState, allPatches, allInversePatches, description, 'batch')
 
 				this.logger.debug('Batch operation completed', {
 					description,
@@ -552,15 +455,14 @@ export abstract class StateMachine<T extends object> {
 
 			this.validateState(newState)
 			this.historyIndex--
-			this.setState(newState, false)
-
-			this.emit('afterMutate', {
-				state: newState,
-				patches: snapshot.inversePatches,
-				inversePatches: snapshot.patches,
-				description: snapshot.description,
-				operation: 'undo',
-			})
+			this.historyInfoCache = null
+			this.commit(
+				newState,
+				snapshot.inversePatches,
+				snapshot.patches,
+				snapshot.description,
+				'undo'
+			)
 
 			this.logger.debug('Undo operation completed', {
 				description: snapshot.description,
@@ -598,15 +500,14 @@ export abstract class StateMachine<T extends object> {
 			const newState = applyPatches(this.state, snapshot.patches) as T
 
 			this.validateState(newState)
-			this.setState(newState, false)
-
-			this.emit('afterMutate', {
-				state: newState,
-				patches: snapshot.patches,
-				inversePatches: snapshot.inversePatches,
-				description: snapshot.description,
-				operation: 'redo',
-			})
+			this.historyInfoCache = null
+			this.commit(
+				newState,
+				snapshot.patches,
+				snapshot.inversePatches,
+				snapshot.description,
+				'redo'
+			)
 
 			this.logger.debug('Redo operation completed', {
 				description: snapshot.description,
@@ -623,8 +524,15 @@ export abstract class StateMachine<T extends object> {
 			})
 
 			this.historyIndex--
+			this.historyInfoCache = null
 			return false
 		}
+	}
+
+	public applyPatchSet(patches: Patch[], description?: string): void {
+		this.mutate(draft => {
+			applyPatches(draft, patches)
+		}, description)
 	}
 
 	public canUndo(): boolean {
@@ -639,14 +547,18 @@ export abstract class StateMachine<T extends object> {
 	 * HISTORY METHODS
 	 */
 	public getHistoryInfo(): StateHistoryInfo {
-		return {
-			canUndo: this.canUndo(),
-			canRedo: this.canRedo(),
-			historyLength: this.history.length,
-			currentIndex: this.historyIndex,
-			lastAction: this.history[this.historyIndex]?.description || null,
-			memoryUsage: calculateMemoryUsage(this.history),
+		// Keep this referentially stable between history changes, since
+		// useSyncExternalStore compares snapshots with Object.is
+		if (!this.historyInfoCache) {
+			this.historyInfoCache = {
+				canUndo: this.canUndo(),
+				canRedo: this.canRedo(),
+				historyLength: this.history.length,
+				currentIndex: this.historyIndex,
+				lastAction: this.history[this.historyIndex]?.description || null,
+			}
 		}
+		return this.historyInfoCache
 	}
 
 	public clearHistory(): void {
@@ -655,6 +567,7 @@ export abstract class StateMachine<T extends object> {
 		const oldLength = this.history.length
 		this.history = []
 		this.historyIndex = -1
+		this.historyInfoCache = null
 
 		this.logger.info('History cleared', { previousLength: oldLength })
 	}
@@ -713,7 +626,7 @@ export abstract class StateMachine<T extends object> {
 			this.logger.debug('Force save started')
 
 			await this.saveToServer(this.state)
-			this.persistToLocal()
+			this.persistNow()
 			this.isDirty = false
 
 			this.logger.info('Force save completed successfully')
@@ -735,17 +648,17 @@ export abstract class StateMachine<T extends object> {
 		return this.isDirty
 	}
 
-	public setAutoSaveInterval(minutes: number): void {
+	public setAutoSaveInterval(ms: number): void {
 		this.assertNotDestroyed()
 
-		if (typeof minutes !== 'number' || minutes <= 0) {
+		if (typeof ms !== 'number' || ms <= 0) {
 			throw new StateValidationError('Auto-save interval must be a positive number')
 		}
 
-		this.config.autoSaveInterval = minutes
+		this.config.autoSaveIntervalMs = ms
 		this.restartAutoSave()
 
-		this.logger.info('Auto-save interval updated', { minutes })
+		this.logger.info('Auto-save interval updated', { ms })
 	}
 
 	public async loadFromServerManually(): Promise<boolean> {
@@ -761,7 +674,7 @@ export abstract class StateMachine<T extends object> {
 				this.isDirty = false
 				this.clearHistory()
 				this.notifyListeners()
-				this.persistToLocal()
+				this.persistNow()
 
 				this.logger.info('Manual server load completed successfully')
 				return true
@@ -786,30 +699,20 @@ export abstract class StateMachine<T extends object> {
 		this.logger.debug('Resetting state to initial state')
 		this.validateState(initialState)
 
-		// Clear history
 		this.history = []
 		this.historyIndex = -1
+		this.historyInfoCache = null
 
-		// Reset state
-		this.state = initialState
-		this.isDirty = true
-
-		// Notify listeners
-		this.notifyListeners()
-
-		// Persist the reset state
-		this.persistToLocal()
+		this.setState(initialState)
 
 		if (this.devtools) {
 			this.devtools.send('State Reset', initialState, [])
 		}
 
-		// Broadcast to other tabs
 		if (this.syncManager) {
 			this.syncManager.broadcastChange(initialState, [], [], 'State Reset')
 		}
 
-		// Hopefully the entire state was reset
 		this.logger.info('State reset to initial state')
 	}
 
@@ -828,6 +731,13 @@ export abstract class StateMachine<T extends object> {
 		this.logger.info('Destroying StateMachine')
 		this.emit('destroy', { finalState: this.state })
 
+		this.flushPersist()
+
+		if (this.pagehideHandler) {
+			window.removeEventListener('pagehide', this.pagehideHandler)
+			this.pagehideHandler = null
+		}
+
 		this.isDestroyed = true
 		this.listeners.clear()
 
@@ -836,19 +746,16 @@ export abstract class StateMachine<T extends object> {
 			this.autoSaveTimer = null
 		}
 
-		// Disconnect DevTools
 		if (this.devtools) {
 			this.devtools.disconnect()
 			this.devtools = null
 		}
 
-		// Destroy sync manager
 		if (this.syncManager) {
 			this.syncManager.destroy()
 			this.syncManager = null
 		}
 
-		// Clear references to help garbage collection
 		this.history = []
 		this.listeners = new Set()
 		this.eventListeners = null
@@ -867,8 +774,35 @@ export abstract class StateMachine<T extends object> {
 			this.isDirty = true
 		}
 
-		this.debouncedNotify()
-		this.persistToLocal()
+		this.notifyListeners()
+		this.schedulePersist()
+	}
+
+	private commit(
+		nextState: T,
+		patches: Patch[],
+		inversePatches: Patch[],
+		description: string | undefined,
+		operation: MutationOperation
+	): void {
+		// Undo/redo revert to states that were already saved, so they don't mark dirty
+		this.setState(nextState, operation === 'mutate' || operation === 'batch')
+
+		this.emit('afterMutate', {
+			state: nextState,
+			patches,
+			inversePatches,
+			description,
+			operation,
+		})
+
+		if (this.devtools) {
+			this.devtools.send(description || operation, nextState, patches)
+		}
+
+		if (this.syncManager) {
+			this.syncManager.broadcastChange(nextState, patches, inversePatches, description)
+		}
 	}
 
 	protected emit<E extends LifecycleEvent>(event: E, payload: LifecyclePayloadMap<T>[E]): void {
@@ -908,7 +842,7 @@ export abstract class StateMachine<T extends object> {
 			throw new StateValidationError('Initial state must be an object')
 		}
 
-		if (config.autoSaveInterval !== undefined && config.autoSaveInterval <= 0) {
+		if (config.autoSaveIntervalMs !== undefined && config.autoSaveIntervalMs <= 0) {
 			throw new StateValidationError('Auto-save interval must be positive')
 		}
 
@@ -970,6 +904,7 @@ export abstract class StateMachine<T extends object> {
 		this.history.push(snapshot)
 
 		this.historyIndex++
+		this.historyInfoCache = null
 
 		if (this.history.length > this.config.maxHistorySize) {
 			this.history.shift()
@@ -999,43 +934,12 @@ export abstract class StateMachine<T extends object> {
 			timestamp: Date.now(),
 		}
 
-		// Freeze context to prevent modification
 		Object.freeze(context)
 
-		// Compose middleware chain in reverse order with timeout protection
-		const composed = this.config.middleware.reduceRight((next, middleware) => {
-			return (draft: Draft<T>) => {
-				let completed = false
-				const timeoutMs = 5000
-
-				const timer = setTimeout(() => {
-					if (!completed) {
-						const error = new StateMachineError(
-							'Middleware execution timeout',
-							'MIDDLEWARE_TIMEOUT'
-						)
-						this.logger.error('Middleware timeout', {
-							description,
-							operation,
-							timeoutMs,
-						})
-						throw error
-					}
-				}, timeoutMs)
-
-				try {
-					middleware(context, next, draft)
-					completed = true
-					clearTimeout(timer)
-				} catch (error) {
-					completed = true
-					clearTimeout(timer)
-					throw error
-				}
-			}
-		}, recipe)
-
-		return composed
+		return this.config.middleware.reduceRight<(draft: Draft<T>) => void>(
+			(next, middleware) => draft => middleware(context, next, draft),
+			recipe
+		)
 	}
 
 	/*
@@ -1079,21 +983,24 @@ export abstract class StateMachine<T extends object> {
 	}
 
 	private handleRemoteStateUpdate(newState: T, patches?: Patch[]): void {
-		// State update from another tab
+		// Dropped updates are recovered by the post-hydration requestFullSync
+		if (!this.isHydrated) {
+			this.logger.debug('Skipping remote state update before hydration')
+			return
+		}
+
 		try {
 			if (patches) {
-				// Apply patches approach
 				const patchedState = applyPatches(this.state, patches) as T
 				this.validateState(patchedState)
 				this.state = patchedState
 			} else {
-				// Full state replacement
 				this.validateState(newState)
 				this.state = newState
 			}
 
 			this.notifyListeners()
-			this.persistToLocal()
+			this.schedulePersist()
 
 			this.logger.debug('Applied remote state update')
 		} catch (error) {
@@ -1111,12 +1018,10 @@ export abstract class StateMachine<T extends object> {
 
 		const filter = this.config.persistenceFilter
 
-		// Custom filter takes precedence
 		if (filter.custom) {
 			return filter.custom(state)
 		}
 
-		// Exclude approach (blacklist)
 		if (filter.exclude) {
 			const filtered = { ...state }
 			filter.exclude.forEach(key => {
@@ -1125,7 +1030,6 @@ export abstract class StateMachine<T extends object> {
 			return filtered
 		}
 
-		// Include approach (whitelist)
 		if (filter.include) {
 			const filtered: Partial<T> = {}
 			filter.include.forEach(key => {
@@ -1137,7 +1041,32 @@ export abstract class StateMachine<T extends object> {
 		return state
 	}
 
-	private persistToLocal(): void {
+	private schedulePersist(): void {
+		if (typeof window === 'undefined') {
+			return
+		}
+		if (!this.config.enablePersistence || !this.config.persistenceKey) {
+			return
+		}
+		if (this.persistTimer) {
+			return
+		}
+
+		this.persistTimer = setTimeout(() => {
+			this.persistTimer = null
+			this.persistNow()
+		}, PERSIST_DEBOUNCE_MS)
+	}
+
+	private flushPersist(): void {
+		if (this.persistTimer) {
+			clearTimeout(this.persistTimer)
+			this.persistTimer = null
+			this.persistNow()
+		}
+	}
+
+	private persistNow(): void {
 		if (typeof window === 'undefined') {
 			return
 		}
@@ -1145,54 +1074,41 @@ export abstract class StateMachine<T extends object> {
 			return
 		}
 
-		// Use async IIFE to handle async checksum generation
-		;(async () => {
-			try {
-				const stateToSave = this.filterStateForPersistence(this.state)
+		try {
+			const stateToSave = this.filterStateForPersistence(this.state)
 
-				const checksum = await generateChecksum(stateToSave)
-
-				const persistedState: PersistedState<Partial<T>> = {
-					state: stateToSave,
-					timestamp: Date.now(),
-					version: DEFAULT_VERSION,
-					checksum: checksum,
-				}
-
-				const serialized = JSON.stringify(persistedState)
-
-				// Check size (5MB limit)
-				const sizeInBytes = new Blob([serialized]).size
-				const maxSizeBytes = 5 * 1024 * 1024 // 5MB
-
-				if (sizeInBytes > maxSizeBytes) {
-					this.logger.warn(
-						`State too large to persist: ${(sizeInBytes / 1024 / 1024).toFixed(2)}MB exceeds ${(maxSizeBytes / 1024 / 1024).toFixed(2)}MB limit`
-					)
-
-					this.emit('error', {
-						error: new StatePersistenceError('State too large for localStorage'),
-						operation: 'persist',
-					})
-
-					return
-				}
-
-				if (this.config.persistenceKey) {
-					localStorage.setItem(this.config.persistenceKey, serialized)
-				}
-			} catch (error) {
-				if (error instanceof Error && error.name === 'QuotaExceededError') {
-					this.logger.error('localStorage quota exceeded')
-					this.emit('error', {
-						error: new StatePersistenceError('localStorage quota exceeded'),
-						operation: 'persist',
-					})
-				} else {
-					this.logger.warn('Failed to persist state to localStorage', error)
-				}
+			const persistedState: PersistedState<Partial<T>> = {
+				state: stateToSave,
+				timestamp: Date.now(),
 			}
-		})()
+
+			const serialized = JSON.stringify(persistedState)
+
+			if (serialized.length > MAX_PERSIST_CHARS) {
+				this.logger.warn(
+					`State too large to persist: ${(serialized.length / 1024 / 1024).toFixed(2)}MB exceeds ${(MAX_PERSIST_CHARS / 1024 / 1024).toFixed(2)}MB limit`
+				)
+
+				this.emit('error', {
+					error: new StatePersistenceError('State too large for localStorage'),
+					operation: 'persist',
+				})
+
+				return
+			}
+
+			localStorage.setItem(this.config.persistenceKey, serialized)
+		} catch (error) {
+			if (error instanceof Error && error.name === 'QuotaExceededError') {
+				this.logger.error('localStorage quota exceeded')
+				this.emit('error', {
+					error: new StatePersistenceError('localStorage quota exceeded'),
+					operation: 'persist',
+				})
+			} else {
+				this.logger.warn('Failed to persist state to localStorage', error)
+			}
+		}
 	}
 
 	private loadPersistedState(): T | null {
@@ -1234,14 +1150,6 @@ export abstract class StateMachine<T extends object> {
 				return null
 			}
 
-			if (persistedState.checksum) {
-				generateChecksum(persistedState.state).then(expectedChecksum => {
-					if (persistedState.checksum !== expectedChecksum) {
-						this.logger.warn('Persisted state checksum mismatch detected')
-					}
-				})
-			}
-
 			const mergedState = {
 				...this.config.initialState,
 				...persistedState.state,
@@ -1249,7 +1157,6 @@ export abstract class StateMachine<T extends object> {
 
 			this.logger.debug('Loaded persisted state', {
 				timestamp: persistedState.timestamp,
-				version: persistedState.version,
 			})
 
 			return mergedState
@@ -1270,8 +1177,6 @@ export abstract class StateMachine<T extends object> {
 			return
 		}
 
-		const interval = this.config.autoSaveInterval * 60 * 1000
-
 		this.autoSaveTimer = setInterval(async () => {
 			if (this.isDirty && !this.isDestroyed) {
 				try {
@@ -1280,10 +1185,10 @@ export abstract class StateMachine<T extends object> {
 					this.logger.error('Auto-save failed', error)
 				}
 			}
-		}, interval)
+		}, this.config.autoSaveIntervalMs)
 
 		this.logger.debug('Auto-save started', {
-			intervalMinutes: this.config.autoSaveInterval,
+			intervalMs: this.config.autoSaveIntervalMs,
 		})
 	}
 
@@ -1293,4 +1198,11 @@ export abstract class StateMachine<T extends object> {
 		}
 		this.startAutoSave()
 	}
+}
+
+/*
+ *   FACTORY
+ ***************************************************************************************************/
+export function createStateMachine<T extends object>(config: StateConfig<T>): StateMachine<T> {
+	return new StateMachine(config)
 }

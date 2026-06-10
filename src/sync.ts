@@ -1,4 +1,9 @@
-import { applyPatches, type Patch } from 'immer'
+import { applyPatches, enablePatches, type Patch } from 'immer'
+import { BroadcastChannelTransport } from './transports/broadcast-channel'
+import type { SyncTransport, TransportStatus } from './transports/types'
+
+// Idempotent, and we can't rely on machine.ts having run it
+enablePatches()
 
 /*
  *   TYPES
@@ -8,6 +13,11 @@ export interface SyncConfig {
 	syncDebounce?: number
 	ignoreLocalChanges?: boolean
 	mergeStrategy?: 'latest' | 'patches'
+	transport?: SyncTransport
+}
+
+type NormalizedSyncConfig = Required<Omit<SyncConfig, 'transport'>> & {
+	transport: SyncTransport | undefined
 }
 
 type SyncMessage<T> = {
@@ -18,6 +28,9 @@ type SyncMessage<T> = {
 	patches: Patch[] | undefined
 	inversePatches: Patch[] | undefined
 	description: string | undefined
+	// Server-assigned monotonic version. When present, ordering is version-based
+	// and timestamp checks are skipped.
+	version?: number
 }
 
 /*
@@ -35,10 +48,12 @@ function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T 
  *   STATE SYNC MANAGER
  ***************************************************************************************************/
 export class StateSyncManager<T extends object> {
-	private channel: BroadcastChannel | null = null
+	private transport: SyncTransport
 	private instanceId: string
-	private config: Required<SyncConfig>
+	private config: NormalizedSyncConfig
 	private lastSyncTimestamp = 0
+	private lastVersion: number | null = null
+	private resyncPending = false
 	private debouncedSync: (message: SyncMessage<T>) => void
 
 	constructor(
@@ -49,38 +64,41 @@ export class StateSyncManager<T extends object> {
 		this.instanceId = `instance_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 		this.config = this.normalizeConfig(config)
 		this.debouncedSync = debounce(msg => this.send(msg), this.config.syncDebounce)
+		this.transport =
+			this.config.transport ?? new BroadcastChannelTransport({ channel: this.config.channel })
 		this.initialize()
 	}
 
-	private normalizeConfig(config: SyncConfig): Required<SyncConfig> {
+	private normalizeConfig(config: SyncConfig): NormalizedSyncConfig {
 		return {
 			channel: config.channel || 'clutch-state-sync',
 			syncDebounce: config.syncDebounce ?? 50,
 			ignoreLocalChanges: config.ignoreLocalChanges ?? false,
 			mergeStrategy: config.mergeStrategy || 'latest',
+			transport: config.transport,
 		}
 	}
 
 	private initialize(): void {
-		// Check if we're in a browser environment
-		if (typeof BroadcastChannel === 'undefined') {
-			console.warn(
-				'[Clutch Sync] BroadcastChannel not supported in this environment. Multi-instance sync disabled.'
-			)
-			return
-		}
+		this.transport.onMessage(message => {
+			this.handleMessage(message as SyncMessage<T>)
+		})
 
-		try {
-			this.channel = new BroadcastChannel(this.config.channel)
+		this.transport.onStatusChange?.(status => {
+			this.handleStatusChange(status)
+		})
 
-			this.channel.addEventListener('message', event => {
-				this.handleMessage(event.data)
-			})
+		this.transport.start?.()
 
-			// Request full state from other tabs
+		this.requestFullSync()
+	}
+
+	private handleStatusChange(status: TransportStatus): void {
+		if (status === 'connected') {
+			// A reconnect invalidates the version cursor, so always resync from scratch
+			this.lastVersion = null
+			this.resyncPending = false
 			this.requestFullSync()
-		} catch (error) {
-			console.error('[Clutch Sync] Failed to initialize BroadcastChannel:', error)
 		}
 	}
 
@@ -90,7 +108,7 @@ export class StateSyncManager<T extends object> {
 		inversePatches: Patch[],
 		description?: string
 	): void {
-		if (!this.channel || this.config.ignoreLocalChanges) {
+		if (this.config.ignoreLocalChanges) {
 			return
 		}
 
@@ -108,36 +126,83 @@ export class StateSyncManager<T extends object> {
 	}
 
 	private handleMessage(message: SyncMessage<T>): void {
-		// Validate message structure
 		if (!message || typeof message !== 'object') {
 			console.error('[Clutch Sync] Invalid message structure')
 			return
 		}
 
-		// Ignore messages from self
+		// Resync requests carry no state and skip clock checks, because a
+		// clock-skewed client still needs to be able to ask for a resync
+		if (message.type === 'full_sync') {
+			if (message.instanceId !== this.instanceId) {
+				this.broadcastFullState()
+			}
+			return
+		}
+
+		if (typeof message.version === 'number') {
+			this.handleVersionedMessage(message, message.version)
+			return
+		}
+
 		if (message.instanceId === this.instanceId) {
 			return
 		}
 
-		// Validate timestamp is reasonable (not too far in future/past)
 		const now = Date.now()
 		if (message.timestamp > now + 5000 || message.timestamp < now - 60000) {
 			console.error('[Clutch Sync] Invalid timestamp, possible attack')
 			return
 		}
 
-		// Ignore stale messages
 		if (message.timestamp <= this.lastSyncTimestamp) {
 			return
 		}
 
+		if (this.applyMessage(message)) {
+			this.lastSyncTimestamp = message.timestamp
+		}
+	}
+
+	private handleVersionedMessage(message: SyncMessage<T>, version: number): void {
+		if (this.lastVersion !== null && version <= this.lastVersion) {
+			return
+		}
+
+		// The server echoes our own messages back. Advance the cursor without
+		// applying, otherwise every mutation we make would look like a version gap.
+		if (message.instanceId === this.instanceId) {
+			this.lastVersion = version
+			return
+		}
+
+		// Gapped patches build on state we never received. A full state_update
+		// is self-contained, so gaps only matter for patches.
+		const hasGap = this.lastVersion !== null && version > this.lastVersion + 1
+		if (hasGap && message.type === 'patches') {
+			if (!this.resyncPending) {
+				this.resyncPending = true
+				this.requestFullSync()
+			}
+			return
+		}
+
+		if (this.applyMessage(message)) {
+			this.lastVersion = version
+			if (message.type === 'state_update') {
+				this.resyncPending = false
+			}
+		}
+	}
+
+	private applyMessage(message: SyncMessage<T>): boolean {
 		try {
 			switch (message.type) {
 				case 'state_update':
 					if (message.state) {
 						if (typeof message.state !== 'object' || message.state === null) {
 							console.error('[Clutch Sync] Invalid state type')
-							return
+							return false
 						}
 
 						const stateStr = JSON.stringify(message.state)
@@ -145,7 +210,7 @@ export class StateSyncManager<T extends object> {
 							console.error(
 								'[Clutch Sync] Potential prototype pollution detected in state'
 							)
-							return
+							return false
 						}
 
 						if (
@@ -153,19 +218,19 @@ export class StateSyncManager<T extends object> {
 							Object.prototype.hasOwnProperty.call(message.state, 'constructor')
 						) {
 							console.error('[Clutch Sync] Detected dangerous properties in state')
-							return
+							return false
 						}
 
 						this.applyRemoteState(message.state)
-						this.lastSyncTimestamp = message.timestamp
+						return true
 					}
-					break
+					return false
 
 				case 'patches':
 					if (message.patches) {
 						if (!Array.isArray(message.patches)) {
 							console.error('[Clutch Sync] Invalid patches format')
-							return
+							return false
 						}
 
 						for (const patch of message.patches) {
@@ -176,7 +241,7 @@ export class StateSyncManager<T extends object> {
 								!Array.isArray(patch.path)
 							) {
 								console.error('[Clutch Sync] Invalid patch structure')
-								return
+								return false
 							}
 
 							for (const pathSegment of patch.path) {
@@ -186,7 +251,7 @@ export class StateSyncManager<T extends object> {
 									pathSegment === 'prototype'
 								) {
 									console.error('[Clutch Sync] Dangerous property in patch path')
-									return
+									return false
 								}
 							}
 						}
@@ -196,32 +261,25 @@ export class StateSyncManager<T extends object> {
 
 						if (typeof patchedState !== 'object' || patchedState === null) {
 							console.error('[Clutch Sync] Invalid patched state')
-							return
+							return false
 						}
 
 						this.applyRemoteState(patchedState, message.patches)
-						this.lastSyncTimestamp = message.timestamp
+						return true
 					}
-					break
-
-				case 'full_sync':
-					// Another tab requesting full state
-					this.broadcastFullState()
-					break
+					return false
 
 				default:
 					console.error('[Clutch Sync] Unknown message type:', message.type)
+					return false
 			}
 		} catch (error) {
 			console.error('[Clutch Sync] Failed to handle message:', error)
+			return false
 		}
 	}
 
 	private requestFullSync(): void {
-		if (!this.channel) {
-			return
-		}
-
 		const message: SyncMessage<T> = {
 			type: 'full_sync',
 			instanceId: this.instanceId,
@@ -236,10 +294,6 @@ export class StateSyncManager<T extends object> {
 	}
 
 	private broadcastFullState(): void {
-		if (!this.channel) {
-			return
-		}
-
 		const message: SyncMessage<T> = {
 			type: 'state_update',
 			instanceId: this.instanceId,
@@ -254,25 +308,14 @@ export class StateSyncManager<T extends object> {
 	}
 
 	private send(message: SyncMessage<T>): void {
-		if (!this.channel) {
-			return
-		}
-
 		try {
-			this.channel.postMessage(message)
+			this.transport.send(message)
 		} catch (error) {
 			console.error('[Clutch Sync] Failed to broadcast message:', error)
 		}
 	}
 
 	public destroy(): void {
-		if (this.channel) {
-			try {
-				this.channel.close()
-			} catch (error) {
-				// Ignore close errors
-			}
-			this.channel = null
-		}
+		this.transport.destroy()
 	}
 }

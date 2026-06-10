@@ -130,7 +130,6 @@ export class DevToolsConnector<T extends object> {
 				case 'JUMP_TO_ACTION':
 					if (message.state) {
 						const parsed = JSON.parse(message.state, (key, value) => {
-							// Reject dangerous keys that could lead to prototype pollution
 							if (
 								key === '__proto__' ||
 								key === 'constructor' ||

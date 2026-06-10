@@ -46,7 +46,6 @@ class TestStateMachine extends StateMachine<TestState> {
 		})
 	}
 
-	// Expose emit for testing
 	public emitForTesting<E extends import('../machine').LifecycleEvent>(
 		event: E,
 		payload: import('../machine').LifecyclePayloadMap<TestState>[E]
@@ -348,9 +347,7 @@ describe('React Hooks - StateMachine', () => {
 	})
 
 	describe('useStateHistory', () => {
-		// Note: useStateHistory currently has an issue with useSyncExternalStore
-		// causing infinite loops in tests due to getHistoryInfo() returning new objects
-		it.skip('should provide history methods', () => {
+		it('should provide history methods', () => {
 			const { result } = renderHook(() => useStateHistory(engine))
 
 			expect(result.current.undo).toBeDefined()
@@ -358,7 +355,7 @@ describe('React Hooks - StateMachine', () => {
 			expect(result.current.clearHistory).toBeDefined()
 		})
 
-		it.skip('should execute undo/redo operations', () => {
+		it('should execute undo/redo operations', () => {
 			const { result } = renderHook(() => useStateHistory(engine))
 
 			act(() => {
@@ -380,7 +377,7 @@ describe('React Hooks - StateMachine', () => {
 			expect(engine.getState().count).toBe(25)
 		})
 
-		it.skip('should clear history', () => {
+		it('should clear history', () => {
 			const { result } = renderHook(() => useStateHistory(engine))
 
 			act(() => {

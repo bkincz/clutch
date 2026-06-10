@@ -5,7 +5,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { StateMachine, StateMachineError } from '../machine'
 import { StateRegistry } from '../store'
 
-// Helper to wait for debounced notifications (16ms debounce + buffer)
 const waitForNotification = () => new Promise(resolve => setTimeout(resolve, 25))
 
 /*
@@ -206,7 +205,8 @@ describe('StateRegistry', () => {
 
 			store.subscribeToMachine('user', listener)
 
-			expect(listener).toHaveBeenCalledTimes(1)
+			// No initial call on subscribe
+			expect(listener).toHaveBeenCalledTimes(0)
 
 			userMachine.mutate(draft => {
 				draft.name = 'Jane'
@@ -214,7 +214,7 @@ describe('StateRegistry', () => {
 
 			await waitForNotification()
 
-			expect(listener).toHaveBeenCalledTimes(2)
+			expect(listener).toHaveBeenCalledTimes(1)
 
 			todosMachine.mutate(draft => {
 				draft.items.push({ id: '2', text: 'New', completed: false })
@@ -222,7 +222,7 @@ describe('StateRegistry', () => {
 
 			await waitForNotification()
 
-			expect(listener).toHaveBeenCalledTimes(2)
+			expect(listener).toHaveBeenCalledTimes(1)
 		})
 
 		it('should throw when subscribing to non-existent machine', () => {
@@ -278,7 +278,6 @@ describe('StateRegistry', () => {
 		})
 
 		it('should clear history on all machines', () => {
-			// Create history
 			userMachine.mutate(draft => {
 				draft.name = 'Change 1'
 			})
@@ -366,7 +365,9 @@ describe('StateMachine.reset()', () => {
 		const listener = vi.fn()
 
 		machine.subscribe(listener)
-		expect(listener).toHaveBeenCalledTimes(1)
+
+		// No initial call on subscribe
+		expect(listener).toHaveBeenCalledTimes(0)
 
 		machine.mutate(draft => {
 			draft.name = 'Jane'
@@ -374,13 +375,13 @@ describe('StateMachine.reset()', () => {
 
 		await waitForNotification()
 
-		expect(listener).toHaveBeenCalledTimes(2)
+		expect(listener).toHaveBeenCalledTimes(1)
 
 		machine.reset()
 
 		await waitForNotification()
 
-		expect(listener).toHaveBeenCalledTimes(3)
+		expect(listener).toHaveBeenCalledTimes(2)
 		expect(listener).toHaveBeenLastCalledWith({ name: 'John', email: 'john@example.com' })
 	})
 

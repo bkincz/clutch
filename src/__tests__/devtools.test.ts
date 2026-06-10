@@ -17,7 +17,6 @@ describe('DevTools Integration', () => {
 	let mockConnection: any
 
 	beforeEach(() => {
-		// Mock Redux DevTools Extension
 		mockConnection = {
 			init: vi.fn(),
 			send: vi.fn(),
@@ -112,7 +111,7 @@ describe('DevTools Integration', () => {
 
 		expect(mockConnection.send).toHaveBeenCalledWith(
 			expect.objectContaining({
-				type: 'State Mutated',
+				type: 'mutate',
 			}),
 			expect.any(Object),
 			{},
