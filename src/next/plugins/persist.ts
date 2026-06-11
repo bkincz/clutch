@@ -34,10 +34,8 @@ export interface PersistConfig<T> {
 }
 
 export interface PersistApi {
-	/** Applies persisted state. Returns true when stored state was found and applied. */
 	hydrate(): boolean
 	isHydrated(): boolean
-	/** Writes a pending debounced persist immediately. */
 	flush(): void
 	clearPersisted(): void
 }
@@ -53,7 +51,6 @@ const resolveDefaultStorage = (): PersistStorage | null => {
 		}
 		return window.localStorage
 	} catch {
-		// localStorage access can throw in privacy modes and sandboxed frames
 		return null
 	}
 }
@@ -134,7 +131,6 @@ export function persist<T extends object>(config: PersistConfig<T>): Plugin<T, P
 					'persist'
 				)
 			}
-			// Any other storage failure is non-fatal, state just stays in memory
 		}
 	}
 
@@ -229,7 +225,6 @@ export function persist<T extends object>(config: PersistConfig<T>): Plugin<T, P
 
 		onInit(context) {
 			ctx = context
-			// Persisted partials merge over the state present at install time
 			baseState = context.getState()
 
 			if (typeof window !== 'undefined' && storage) {

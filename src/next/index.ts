@@ -18,6 +18,7 @@ export type {
  ***************************************************************************************************/
 export { history } from './plugins/history'
 export { persist } from './plugins/persist'
+export { devtools } from './plugins/devtools'
 
 export type {
 	HistoryApi,
@@ -33,5 +34,7 @@ export type {
 	PersistStorage,
 	PersistedEnvelope,
 } from './plugins/persist'
+
+export type { DevtoolsConfig } from './plugins/devtools'
 
 export type { Draft, Patch } from 'immer'

@@ -272,7 +272,6 @@ export class Machine<T extends object> {
 			timestamp: Date.now(),
 		}
 
-		// Veto phase: a throw reaches the caller and nothing is applied
 		for (const plugin of this.plugins) {
 			plugin.onBeforeCommit?.(payload)
 		}
