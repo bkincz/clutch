@@ -183,6 +183,38 @@ describe('next/core Machine', () => {
 		})
 	})
 
+	describe('reset', () => {
+		it('returns to the initial state and notifies listeners', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.mutate(draft => {
+				draft.count = 5
+			})
+			machine.reset()
+
+			expect(machine.getState()).toEqual(initialState())
+			expect(listener).toHaveBeenLastCalledWith(initialState())
+			expect(machine.getInitialState()).toEqual(initialState())
+		})
+
+		it('clears history through the full-replace rule', () => {
+			const machine = createMachine({ initialState: initialState() }).with(
+				history<TestState>()
+			)
+
+			machine.mutate(draft => {
+				draft.count = 5
+			})
+			expect(machine.canUndo()).toBe(true)
+
+			machine.reset()
+
+			expect(machine.canUndo()).toBe(false)
+		})
+	})
+
 	describe('destroy', () => {
 		it('calls onDestroy in reverse install order with the final state', () => {
 			const machine = createMachine({ initialState: initialState() })

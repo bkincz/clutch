@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import type { Draft } from 'immer'
 import type { Machine } from './core'
+import type { MachineMap, Registry, RegistryState } from './registry'
 import type { HistoryApi } from './plugins/history'
 import type { PersistApi } from './plugins/persist'
 import type { AutosaveApi } from './plugins/autosave'
@@ -11,7 +12,6 @@ import type { AutosaveApi } from './plugins/autosave'
 /*
  *   CORE HOOKS
  ***************************************************************************************************/
-
 export function useMachine<T extends object>(machine: Machine<T>) {
 	const subscribe = useCallback(
 		(onStoreChange: () => void) => machine.subscribe(onStoreChange),
@@ -83,6 +83,54 @@ export function useSubscription<T extends object>(
 	useEffect(() => {
 		return machine.subscribe(state => callbackRef.current(state))
 	}, [machine])
+}
+
+/*
+ *   REGISTRY HOOKS
+ ***************************************************************************************************/
+export function useRegistry<M extends MachineMap>(registry: Registry<M>) {
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => registry.subscribe(onStoreChange),
+		[registry]
+	)
+	const getSnapshot = useCallback(() => registry.getState(), [registry])
+
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
+}
+
+export function useRegistrySlice<M extends MachineMap, TSelected>(
+	registry: Registry<M>,
+	selector: (state: RegistryState<M>) => TSelected,
+	equalityFn: (a: TSelected, b: TSelected) => boolean = Object.is
+) {
+	const selectorRef = useRef(selector)
+	const equalityFnRef = useRef(equalityFn)
+	const selectedRef = useRef<TSelected | undefined>(undefined)
+	const hasSelectedRef = useRef(false)
+
+	selectorRef.current = selector
+	equalityFnRef.current = equalityFn
+
+	const subscribe = useCallback(
+		(onStoreChange: () => void) => registry.subscribe(onStoreChange),
+		[registry]
+	)
+
+	const getSnapshot = useCallback(() => {
+		const newSelected = selectorRef.current(registry.getState())
+
+		if (
+			!hasSelectedRef.current ||
+			!equalityFnRef.current(selectedRef.current as TSelected, newSelected)
+		) {
+			selectedRef.current = newSelected
+			hasSelectedRef.current = true
+		}
+
+		return selectedRef.current as TSelected
+	}, [registry])
+
+	return useSyncExternalStore(subscribe, getSnapshot, getSnapshot)
 }
 
 /*

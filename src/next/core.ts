@@ -77,6 +77,7 @@ const toError = (value: unknown): Error =>
  ***************************************************************************************************/
 export class Machine<T extends object> {
 	private state: T
+	private readonly initialState: T
 	private listeners: Set<(state: T) => void> = new Set()
 	private plugins: Plugin<T, object>[] = []
 	private isDestroyed = false
@@ -92,6 +93,7 @@ export class Machine<T extends object> {
 		}
 
 		this.state = config.initialState
+		this.initialState = config.initialState
 
 		this.ctx = {
 			getState: () => this.getState(),
@@ -221,6 +223,23 @@ export class Machine<T extends object> {
 		}
 
 		this.commit(finalState, allPatches, allInversePatches, description, 'batch')
+	}
+
+	/*
+	 * RESET
+	 */
+	public getInitialState(): T {
+		return this.initialState
+	}
+
+	// Runs as a full-state replace, so history clears and persist rewrites.
+	// Unlike v2, resets stay local: peers are not notified through sync.
+	public reset(): void {
+		this.assertNotDestroyed()
+		this.applyExternalState(this.initialState, {
+			source: 'reset',
+			description: 'State Reset',
+		})
 	}
 
 	/*

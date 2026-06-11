@@ -2,6 +2,7 @@
  *   V3 PLUGIN CORE (PREVIEW)
  ***************************************************************************************************/
 export { Machine, createMachine, MachineError } from './core'
+export { Registry, createRegistry } from './registry'
 
 export type {
 	MachineConfig,
@@ -12,6 +13,8 @@ export type {
 	ExternalStateMeta,
 	EmptyExtension,
 } from './core'
+
+export type { MachineMap, RegistryState, RegistryListener } from './registry'
 
 /*
  *   PLUGINS

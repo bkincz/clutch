@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { createMachine } from '../next/core'
+import { createRegistry } from '../next/registry'
 import { history } from '../next/plugins/history'
 import { persist, type PersistStorage } from '../next/plugins/persist'
 import { autosave } from '../next/plugins/autosave'
@@ -11,6 +12,8 @@ import {
 	useMachineHistory,
 	useHydration,
 	useAutosave,
+	useRegistry,
+	useRegistrySlice,
 } from '../next/react'
 
 interface TestState {
@@ -131,6 +134,56 @@ describe('next/react', () => {
 			})
 
 			expect(callback).not.toHaveBeenCalled()
+		})
+	})
+
+	describe('useRegistry', () => {
+		it('returns combined state and re-renders when a member changes', () => {
+			const registry = createRegistry({
+				counter: createMachine({ initialState: initialState() }),
+			})
+			const { result } = renderHook(() => useRegistry(registry))
+
+			expect(result.current.counter.count).toBe(0)
+
+			act(() => {
+				registry.machines.counter.mutate(draft => {
+					draft.count = 4
+				})
+			})
+
+			expect(result.current.counter.count).toBe(4)
+		})
+	})
+
+	describe('useRegistrySlice', () => {
+		it('re-renders only when the selected slice changes', () => {
+			const registry = createRegistry({
+				a: createMachine({ initialState: initialState() }),
+				b: createMachine({ initialState: initialState() }),
+			})
+			let renders = 0
+
+			const { result } = renderHook(() => {
+				renders++
+				return useRegistrySlice(registry, state => state.a.count)
+			})
+
+			const rendersBefore = renders
+
+			act(() => {
+				registry.machines.b.mutate(draft => {
+					draft.count = 9
+				})
+			})
+			expect(renders).toBe(rendersBefore)
+
+			act(() => {
+				registry.machines.a.mutate(draft => {
+					draft.count = 2
+				})
+			})
+			expect(result.current).toBe(2)
 		})
 	})
 
