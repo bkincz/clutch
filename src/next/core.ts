@@ -277,7 +277,6 @@ export class Machine<T extends object> {
 		}
 
 		this.state = nextState
-		this.notifyListeners()
 
 		for (const plugin of this.plugins) {
 			try {
@@ -286,13 +285,14 @@ export class Machine<T extends object> {
 				this.emitError(toError(error), `plugin:${plugin.name}:onCommit`)
 			}
 		}
+
+		this.notifyListeners()
 	}
 
 	private applyExternalState(nextState: T, meta: ExternalStateMeta): void {
 		this.assertNotDestroyed()
 
 		this.state = nextState
-		this.notifyListeners()
 
 		for (const plugin of this.plugins) {
 			if (plugin.name === meta.source) {
@@ -305,6 +305,8 @@ export class Machine<T extends object> {
 				this.emitError(toError(error), `plugin:${plugin.name}:onExternalState`)
 			}
 		}
+
+		this.notifyListeners()
 	}
 
 	private notifyListeners(): void {

@@ -26,6 +26,11 @@
       "import": "./dist/next.mjs",
       "require": "./dist/next.js"
     },
+    "./next/react": {
+      "types": "./dist/next-react.d.ts",
+      "import": "./dist/next-react.mjs",
+      "require": "./dist/next-react.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -126,6 +131,11 @@
       "path": "dist/next.mjs",
       "import": "{ createMachine }",
       "limit": "6 KB"
+    },
+    {
+      "name": "Next React adapter",
+      "path": "dist/next-react.mjs",
+      "limit": "3 KB"
     },
     {
       "name": "Full bundle",

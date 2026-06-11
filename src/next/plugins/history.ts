@@ -72,16 +72,21 @@ export function history<T extends object>(config: HistoryConfig = {}): Plugin<T,
 			return false
 		}
 
+		// We move the cursor before applying so listeners are notified during the
+		// apply and read the new position. Don't revert if the apply throws
+		index--
+		infoCache = null
+
 		try {
 			const meta: Omit<ExternalStateMeta, 'patches'> = { source: HISTORY_SOURCE }
 			if (snapshot.description) {
 				meta.description = snapshot.description
 			}
 			ctx.applyPatches(snapshot.inversePatches, meta)
-			index--
-			infoCache = null
 			return true
 		} catch (error) {
+			index++
+			infoCache = null
 			ctx.emitError(error instanceof Error ? error : new Error(String(error)), 'undo')
 			return false
 		}
@@ -97,16 +102,19 @@ export function history<T extends object>(config: HistoryConfig = {}): Plugin<T,
 			return false
 		}
 
+		index++
+		infoCache = null
+
 		try {
 			const meta: Omit<ExternalStateMeta, 'patches'> = { source: HISTORY_SOURCE }
 			if (snapshot.description) {
 				meta.description = snapshot.description
 			}
 			ctx.applyPatches(snapshot.patches, meta)
-			index++
-			infoCache = null
 			return true
 		} catch (error) {
+			index--
+			infoCache = null
 			ctx.emitError(error instanceof Error ? error : new Error(String(error)), 'redo')
 			return false
 		}

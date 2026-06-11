@@ -6,6 +6,7 @@ export default defineConfig({
 		react: 'src/integrations/react/index.ts',
 		'sync-ws': 'src/transports/websocket.ts',
 		next: 'src/next/index.ts',
+		'next-react': 'src/next/react.ts',
 	},
 	format: ['cjs', 'esm'],
 	dts: true,
