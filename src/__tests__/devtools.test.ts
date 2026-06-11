@@ -1,20 +1,34 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { StateMachine } from '../machine'
+import { createMachine, type PluginContext } from '../core'
+import { devtools } from '../plugins/devtools'
+import { history } from '../plugins/history'
 
 interface TestState {
 	count: number
 	name: string
 }
 
-class TestMachine extends StateMachine<TestState> {
-	constructor(config: any) {
-		super(config)
-	}
+const initialState = (): TestState => ({ count: 0, name: 'test' })
+
+type DispatchMessage = {
+	type: string
+	payload?: { type: string; [key: string]: unknown }
+	state?: string
 }
 
-describe('DevTools Integration', () => {
-	let mockExtension: any
-	let mockConnection: any
+describe('plugins/devtools', () => {
+	let mockConnection: {
+		init: ReturnType<typeof vi.fn>
+		send: ReturnType<typeof vi.fn>
+		subscribe: ReturnType<typeof vi.fn>
+		unsubscribe: ReturnType<typeof vi.fn>
+	}
+	let mockExtension: { connect: ReturnType<typeof vi.fn> }
+
+	const dispatch = (message: DispatchMessage): void => {
+		const subscribeCallback = mockConnection.subscribe.mock.calls[0]?.[0]
+		subscribeCallback(message)
+	}
 
 	beforeEach(() => {
 		mockConnection = {
@@ -23,318 +37,160 @@ describe('DevTools Integration', () => {
 			subscribe: vi.fn(() => vi.fn()),
 			unsubscribe: vi.fn(),
 		}
-
 		mockExtension = {
 			connect: vi.fn(() => mockConnection),
 		}
-
-		// @ts-ignore
-		global.window = {
-			__REDUX_DEVTOOLS_EXTENSION__: mockExtension,
-		} as any
+		;(window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__ = mockExtension
 	})
 
 	afterEach(() => {
-		// @ts-ignore
-		delete global.window
+		delete (window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__
 	})
 
-	it('should connect to DevTools extension when enabled', () => {
-		new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
+	it('connects and sends the initial state on install', () => {
+		createMachine({ initialState: initialState() }).with(
+			devtools<TestState>({ name: 'TestApp', maxAge: 10 })
+		)
 
 		expect(mockExtension.connect).toHaveBeenCalledWith(
-			expect.objectContaining({
-				name: 'StateMachine',
-				instanceId: expect.any(String),
+			expect.objectContaining({ name: 'TestApp', maxAge: 10 })
+		)
+		expect(mockConnection.init).toHaveBeenCalledWith({ count: 0, name: 'test' })
+	})
+
+	it('sends commits with description and patch count', () => {
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
+
+		machine.mutate(draft => {
+			draft.count = 1
+		}, 'increment')
+
+		expect(mockConnection.send).toHaveBeenCalledWith(
+			{ type: 'increment', patches: 1 },
+			expect.objectContaining({ count: 1 }),
+			{},
+			expect.any(String)
+		)
+	})
+
+	it('falls back to the operation name when a commit has no description', () => {
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
+
+		machine.mutate(draft => {
+			draft.count = 1
+		})
+
+		expect(mockConnection.send).toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'mutate' }),
+			expect.anything(),
+			{},
+			expect.any(String)
+		)
+	})
+
+	it('sends external updates from other plugins, labeled by source', () => {
+		let capturedCtx!: PluginContext<TestState>
+		createMachine({ initialState: initialState() })
+			.with({
+				name: 'sync',
+				onInit: (ctx: PluginContext<TestState>) => {
+					capturedCtx = ctx
+				},
 			})
+			.with(devtools<TestState>())
+
+		capturedCtx.replaceState({ count: 9, name: 'remote' }, { source: 'sync' })
+
+		expect(mockConnection.send).toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'external:sync' }),
+			expect.objectContaining({ count: 9 }),
+			{},
+			expect.any(String)
 		)
 	})
 
-	it('should use custom name from config', () => {
-		new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: {
-				name: 'MyApp',
-			},
-		})
+	it('shows undo operations coming from the history plugin', () => {
+		const machine = createMachine({ initialState: initialState() })
+			.with(devtools<TestState>())
+			.with(history<TestState>())
 
-		expect(mockExtension.connect).toHaveBeenCalledWith(
-			expect.objectContaining({
-				name: 'MyApp',
-				instanceId: expect.any(String),
+		machine.mutate(draft => {
+			draft.count = 1
+		}, 'increment')
+		mockConnection.send.mockClear()
+
+		machine.undo()
+
+		expect(mockConnection.send).toHaveBeenCalledWith(
+			expect.objectContaining({ type: 'increment' }),
+			expect.objectContaining({ count: 0 }),
+			{},
+			expect.any(String)
+		)
+	})
+
+	describe('time travel', () => {
+		it('applies JUMP_TO_STATE via replaceState and clears history', () => {
+			const machine = createMachine({ initialState: initialState() })
+				.with(devtools<TestState>())
+				.with(history<TestState>())
+
+			machine.mutate(draft => {
+				draft.count = 1
 			})
-		)
+			expect(machine.canUndo()).toBe(true)
+			mockConnection.send.mockClear()
+
+			dispatch({
+				type: 'DISPATCH',
+				payload: { type: 'JUMP_TO_STATE' },
+				state: JSON.stringify({ count: 77, name: 'jumped' }),
+			})
+
+			expect(machine.getState()).toEqual({ count: 77, name: 'jumped' })
+			expect(machine.canUndo()).toBe(false)
+			// Our own time travel must not echo back to the extension
+			expect(mockConnection.send).not.toHaveBeenCalled()
+		})
+
+		it('rejects prototype pollution in time-travel payloads', () => {
+			const machine = createMachine({ initialState: initialState() }).with(
+				devtools<TestState>()
+			)
+
+			dispatch({
+				type: 'DISPATCH',
+				payload: { type: 'JUMP_TO_STATE' },
+				state: `{"count":5,"__proto__":{"polluted":true}}`,
+			})
+
+			expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+			expect(Object.prototype.hasOwnProperty.call(machine.getState(), '__proto__')).toBe(
+				false
+			)
+		})
 	})
 
-	it('should initialize DevTools with current state', () => {
-		const initialState = { count: 5, name: 'test' }
-		new TestMachine({
-			initialState,
-			enableDevTools: true,
-		})
+	it('disconnects on destroy', () => {
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
-		expect(mockConnection.init).toHaveBeenCalledWith(initialState)
-	})
-
-	it('should send action to DevTools on mutate', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.mutate(draft => {
-			draft.count++
-		}, 'increment count')
-
-		expect(mockConnection.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: 'increment count',
-			}),
-			{ count: 1, name: 'test' },
-			{},
-			expect.any(String)
-		)
-	})
-
-	it('should send default action name if no description provided', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.mutate(draft => {
-			draft.count++
-		})
-
-		expect(mockConnection.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: 'mutate',
-			}),
-			expect.any(Object),
-			{},
-			expect.any(String)
-		)
-	})
-
-	it('should send batch operations to DevTools', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.batch(
-			[
-				draft => {
-					draft.count++
-				},
-				draft => {
-					draft.count++
-				},
-			],
-			'batch increment'
-		)
-
-		expect(mockConnection.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				type: 'batch increment',
-			}),
-			{ count: 2, name: 'test' },
-			{},
-			expect.any(String)
-		)
-	})
-
-	it('should handle time-travel from DevTools', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.mutate(draft => {
-			draft.count = 5
-		})
-
-		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
-		subscribeCallback({
-			type: 'DISPATCH',
-			payload: { type: 'JUMP_TO_STATE' },
-			state: JSON.stringify({ count: 2, name: 'test' }),
-		})
-
-		expect(machine.getState()).toEqual({ count: 2, name: 'test' })
-	})
-
-	it('should clear history on time-travel', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.mutate(draft => {
-			draft.count++
-		})
-		machine.mutate(draft => {
-			draft.count++
-		})
-
-		expect(machine.canUndo()).toBe(true)
-
-		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
-		subscribeCallback({
-			type: 'DISPATCH',
-			payload: { type: 'JUMP_TO_STATE' },
-			state: JSON.stringify({ count: 1, name: 'test' }),
-		})
-
-		expect(machine.canUndo()).toBe(false)
-	})
-
-	it('should handle IMPORT_STATE from DevTools', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
-		subscribeCallback({
-			type: 'DISPATCH',
-			payload: {
-				type: 'IMPORT_STATE',
-				nextLiftedState: {
-					computedStates: [
-						{ state: { count: 1, name: 'test' } },
-						{ state: { count: 2, name: 'test' } },
-						{ state: { count: 3, name: 'imported' } },
-					],
-				},
-			},
-		})
-
-		expect(machine.getState()).toEqual({ count: 3, name: 'imported' })
-	})
-
-	it('should disconnect from DevTools on destroy', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		const unsubscribe = mockConnection.subscribe.mock.results[0].value
+		const unsubscribe = mockConnection.subscribe.mock.results[0]?.value
 		machine.destroy()
 
 		expect(unsubscribe).toHaveBeenCalled()
 		expect(mockConnection.unsubscribe).toHaveBeenCalled()
 	})
 
-	it('should gracefully handle missing DevTools extension', () => {
-		// @ts-ignore
-		global.window = {} as any
+	it('stays inert when the extension is missing', () => {
+		delete (window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__
 
-		expect(() => {
-			new TestMachine({
-				initialState: { count: 0, name: 'test' },
-				enableDevTools: true,
-			})
-		}).not.toThrow()
-	})
-
-	it('should not send to DevTools when disabled', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: false,
-		})
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
 		machine.mutate(draft => {
-			draft.count++
+			draft.count = 1
 		})
 
+		expect(machine.getState().count).toBe(1)
 		expect(mockExtension.connect).not.toHaveBeenCalled()
-		expect(mockConnection.send).not.toHaveBeenCalled()
-	})
-
-	it('should include patch count in action payload', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: true,
-		})
-
-		machine.mutate(draft => {
-			draft.count++
-			draft.name = 'updated'
-		})
-
-		expect(mockConnection.send).toHaveBeenCalledWith(
-			expect.objectContaining({
-				patches: 2,
-			}),
-			expect.any(Object),
-			{},
-			expect.any(String)
-		)
-	})
-
-	it('should support custom DevTools config', () => {
-		new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableDevTools: {
-				name: 'CustomApp',
-				maxAge: 100,
-				latency: 300,
-				features: {
-					jump: true,
-					skip: false,
-					export: true,
-					import: false,
-				},
-			},
-		})
-
-		expect(mockExtension.connect).toHaveBeenCalledWith(
-			expect.objectContaining({
-				name: 'CustomApp',
-				instanceId: expect.any(String),
-				maxAge: 100,
-				latency: 300,
-				features: {
-					jump: true,
-					skip: false,
-					export: true,
-					import: false,
-				},
-			})
-		)
-	})
-
-	it('should handle time-travel validation errors gracefully', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			validateState: (state: TestState) => state.count >= 0,
-			enableDevTools: true,
-		})
-
-		const subscribeCallback = mockConnection.subscribe.mock.calls[0][0]
-
-		subscribeCallback({
-			type: 'DISPATCH',
-			payload: { type: 'JUMP_TO_STATE' },
-			state: JSON.stringify({ count: -1, name: 'test' }),
-		})
-
-		expect(machine.getState().count).toBe(0)
-	})
-
-	it('should work in non-browser environment', () => {
-		// @ts-ignore
-		global.window = undefined
-
-		expect(() => {
-			new TestMachine({
-				initialState: { count: 0, name: 'test' },
-				enableDevTools: true,
-			})
-		}).not.toThrow()
 	})
 })
