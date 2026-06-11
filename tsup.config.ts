@@ -5,6 +5,7 @@ export default defineConfig({
 		index: 'src/index.ts',
 		react: 'src/integrations/react/index.ts',
 		'sync-ws': 'src/transports/websocket.ts',
+		next: 'src/next/index.ts',
 	},
 	format: ['cjs', 'esm'],
 	dts: true,

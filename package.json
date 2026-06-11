@@ -21,6 +21,11 @@
       "import": "./dist/sync-ws.mjs",
       "require": "./dist/sync-ws.js"
     },
+    "./next": {
+      "types": "./dist/next.d.ts",
+      "import": "./dist/next.mjs",
+      "require": "./dist/next.js"
+    },
     "./package.json": "./package.json"
   },
   "files": [
@@ -115,6 +120,12 @@
       "name": "Sync WS",
       "path": "dist/sync-ws.js",
       "limit": "4 KB"
+    },
+    {
+      "name": "Next plugin core",
+      "path": "dist/next.mjs",
+      "import": "{ createMachine }",
+      "limit": "6 KB"
     },
     {
       "name": "Full bundle",
