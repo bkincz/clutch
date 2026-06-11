@@ -40,8 +40,7 @@ describe('next/plugins/devtools', () => {
 		mockExtension = {
 			connect: vi.fn(() => mockConnection),
 		}
-		;(window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__ =
-			mockExtension
+		;(window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__ = mockExtension
 	})
 
 	afterEach(() => {
@@ -60,9 +59,7 @@ describe('next/plugins/devtools', () => {
 	})
 
 	it('sends commits with description and patch count', () => {
-		const machine = createMachine({ initialState: initialState() }).with(
-			devtools<TestState>()
-		)
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
 		machine.mutate(draft => {
 			draft.count = 1
@@ -77,9 +74,7 @@ describe('next/plugins/devtools', () => {
 	})
 
 	it('falls back to the operation name when a commit has no description', () => {
-		const machine = createMachine({ initialState: initialState() }).with(
-			devtools<TestState>()
-		)
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
 		machine.mutate(draft => {
 			draft.count = 1
@@ -170,16 +165,14 @@ describe('next/plugins/devtools', () => {
 			})
 
 			expect(({} as Record<string, unknown>).polluted).toBeUndefined()
-			expect(
-				Object.prototype.hasOwnProperty.call(machine.getState(), '__proto__')
-			).toBe(false)
+			expect(Object.prototype.hasOwnProperty.call(machine.getState(), '__proto__')).toBe(
+				false
+			)
 		})
 	})
 
 	it('disconnects on destroy', () => {
-		const machine = createMachine({ initialState: initialState() }).with(
-			devtools<TestState>()
-		)
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
 		const unsubscribe = mockConnection.subscribe.mock.results[0]?.value
 		machine.destroy()
@@ -191,9 +184,7 @@ describe('next/plugins/devtools', () => {
 	it('stays inert when the extension is missing', () => {
 		delete (window as unknown as Record<string, unknown>).__REDUX_DEVTOOLS_EXTENSION__
 
-		const machine = createMachine({ initialState: initialState() }).with(
-			devtools<TestState>()
-		)
+		const machine = createMachine({ initialState: initialState() }).with(devtools<TestState>())
 
 		machine.mutate(draft => {
 			draft.count = 1

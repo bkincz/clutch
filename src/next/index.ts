@@ -19,13 +19,9 @@ export type {
 export { history } from './plugins/history'
 export { persist } from './plugins/persist'
 export { devtools } from './plugins/devtools'
+export { sync } from './plugins/sync'
 
-export type {
-	HistoryApi,
-	HistoryConfig,
-	HistoryInfo,
-	HistorySnapshot,
-} from './plugins/history'
+export type { HistoryApi, HistoryConfig, HistoryInfo, HistorySnapshot } from './plugins/history'
 
 export type {
 	PersistApi,
@@ -36,5 +32,7 @@ export type {
 } from './plugins/persist'
 
 export type { DevtoolsConfig } from './plugins/devtools'
+export type { SyncApi, SyncPluginConfig } from './plugins/sync'
+export type { SyncTransport, TransportStatus } from '../transports/types'
 
 export type { Draft, Patch } from 'immer'

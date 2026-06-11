@@ -130,9 +130,9 @@ describe('next/plugins/persist', () => {
 
 			expect(machine.getState().count).toBe(5)
 			expect(({} as Record<string, unknown>).polluted).toBeUndefined()
-			expect(
-				Object.prototype.hasOwnProperty.call(machine.getState(), '__proto__')
-			).toBe(false)
+			expect(Object.prototype.hasOwnProperty.call(machine.getState(), '__proto__')).toBe(
+				false
+			)
 		})
 
 		it('clears installed history on deferred hydration (full-state replace)', () => {

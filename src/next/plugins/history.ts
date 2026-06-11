@@ -2,12 +2,7 @@
  *   IMPORTS
  ***************************************************************************************************/
 import type { Patch } from 'immer'
-import {
-	MachineError,
-	type Plugin,
-	type PluginContext,
-	type ExternalStateMeta,
-} from '../core'
+import { MachineError, type Plugin, type PluginContext, type ExternalStateMeta } from '../core'
 
 /*
  *   TYPES

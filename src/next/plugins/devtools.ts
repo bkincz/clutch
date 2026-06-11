@@ -33,7 +33,11 @@ export function devtools<T extends object>(config: DevtoolsConfig = {}): Plugin<
 		},
 
 		onCommit(payload) {
-			connector?.send(payload.description ?? payload.operation, payload.state, payload.patches)
+			connector?.send(
+				payload.description ?? payload.operation,
+				payload.state,
+				payload.patches
+			)
 		},
 
 		// Undo/redo, hydration and sync all land here. The core skips our own
