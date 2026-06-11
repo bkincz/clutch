@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import type { Patch } from 'immer'
-import { createMachine, type PluginContext } from '../next/core'
-import { sync } from '../next/plugins/sync'
-import { history } from '../next/plugins/history'
+import { createMachine, type PluginContext } from '../core'
+import { sync } from '../plugins/sync'
+import { history } from '../plugins/history'
 import type { TransportStatus } from '../transports/types'
 
 interface TestState {
@@ -57,7 +57,7 @@ const remoteMessage = (overrides: Partial<SyncMessage>): Partial<SyncMessage> =>
 	...overrides,
 })
 
-describe('next/plugins/sync', () => {
+describe('plugins/sync', () => {
 	let transport: MockTransport
 
 	beforeEach(() => {

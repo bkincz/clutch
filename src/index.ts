@@ -1,53 +1,49 @@
 /*
  *   CORE EXPORTS
  ***************************************************************************************************/
-export {
-	StateMachine,
-	createStateMachine,
-	StateMachineError,
-	StateValidationError,
-	StatePersistenceError,
-} from './machine'
-
-export { DevToolsConnector } from './devtools'
-export { StateSyncManager } from './sync'
-export { StateRegistry } from './store'
+export { Machine, createMachine, MachineError } from './core'
+export { Registry, createRegistry } from './registry'
+export { createV2Machine } from './compat'
 export { BroadcastChannelTransport } from './transports/broadcast-channel'
 
-// React hooks live in '@bkincz/clutch/react'. The main entry must stay React-free.
+export type {
+	MachineConfig,
+	Plugin,
+	PluginContext,
+	CommitPayload,
+	CommitOperation,
+	ExternalStateMeta,
+	EmptyExtension,
+} from './core'
+
+export type { MachineMap, RegistryState, RegistryListener } from './registry'
+export type { V2CompatConfig, V2Machine, V2LifecycleEvent, V2LifecyclePayloadMap } from './compat'
 
 /*
- *   TYPE EXPORTS
+ *   PLUGINS
  ***************************************************************************************************/
-export type {
-	StateConfig,
-	StateSnapshot,
-	PersistedState,
-	StateHistoryInfo,
-	LifecycleEvent,
-	MutationOperation,
-	AfterMutatePayload,
-	ErrorPayload,
-	DestroyPayload,
-	LifecyclePayloadMap,
-	LifecycleListener,
-	Middleware,
-	MiddlewareContext,
-	MiddlewareNext,
-	PersistenceFilter,
-} from './machine'
+export { history } from './plugins/history'
+export { persist } from './plugins/persist'
+export { devtools } from './plugins/devtools'
+export { sync } from './plugins/sync'
+export { validate } from './plugins/validate'
+export { autosave } from './plugins/autosave'
 
-export type { DevToolsConfig } from './devtools'
-export type { SyncConfig } from './sync'
+export type { HistoryApi, HistoryConfig, HistoryInfo, HistorySnapshot } from './plugins/history'
+
+export type {
+	PersistApi,
+	PersistConfig,
+	PersistFilter,
+	PersistStorage,
+	PersistedEnvelope,
+} from './plugins/persist'
+
+export type { DevtoolsConfig } from './plugins/devtools'
+export type { SyncApi, SyncPluginConfig } from './plugins/sync'
+export type { StateValidator } from './plugins/validate'
+export type { AutosaveApi, AutosaveConfig } from './plugins/autosave'
 export type { SyncTransport, TransportStatus } from './transports/types'
 export type { BroadcastChannelTransportConfig } from './transports/broadcast-channel'
-export type {
-	RegistryConfig,
-	MachineStates,
-	MachineRegistry,
-	CombinedState,
-	RegistryListener,
-	MachineListener,
-} from './store'
 
-export type { Draft } from 'immer'
+export type { Draft, Patch } from 'immer'

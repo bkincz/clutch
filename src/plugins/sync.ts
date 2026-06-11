@@ -1,7 +1,7 @@
 /*
  *   IMPORTS
  ***************************************************************************************************/
-import { StateSyncManager, type SyncConfig } from '../../sync'
+import { StateSyncManager, type SyncConfig } from '../sync'
 import type { Plugin, PluginContext, ExternalStateMeta } from '../core'
 
 /*

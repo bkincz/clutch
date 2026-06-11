@@ -1,10 +1,10 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { createMachine } from '../next/core'
-import { createRegistry } from '../next/registry'
-import { history } from '../next/plugins/history'
-import { persist, type PersistStorage } from '../next/plugins/persist'
-import { autosave } from '../next/plugins/autosave'
+import { createMachine } from '../core'
+import { createRegistry } from '../registry'
+import { history } from '../plugins/history'
+import { persist, type PersistStorage } from '../plugins/persist'
+import { autosave } from '../plugins/autosave'
 import {
 	useMachine,
 	useSlice,
@@ -14,7 +14,7 @@ import {
 	useAutosave,
 	useRegistry,
 	useRegistrySlice,
-} from '../next/react'
+} from '../react'
 
 interface TestState {
 	count: number
@@ -37,7 +37,7 @@ const createMemoryStorage = (): PersistStorage & { store: Map<string, string> } 
 	}
 }
 
-describe('next/react', () => {
+describe('react', () => {
 	describe('useMachine', () => {
 		it('returns state and re-renders on mutation', () => {
 			const machine = createMachine({ initialState: initialState() })

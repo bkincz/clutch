@@ -1,7 +1,7 @@
 {
   "name": "@bkincz/clutch",
-  "version": "2.0.0",
-  "description": "A production-ready, TypeScript-first state management library built on Immer with advanced features",
+  "version": "3.0.0",
+  "description": "A TypeScript-first, plugin-based state management library built on Immer",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -20,16 +20,6 @@
       "types": "./dist/sync-ws.d.ts",
       "import": "./dist/sync-ws.mjs",
       "require": "./dist/sync-ws.js"
-    },
-    "./next": {
-      "types": "./dist/next.d.ts",
-      "import": "./dist/next.mjs",
-      "require": "./dist/next.js"
-    },
-    "./next/react": {
-      "types": "./dist/next-react.d.ts",
-      "import": "./dist/next-react.mjs",
-      "require": "./dist/next-react.js"
     },
     "./package.json": "./package.json"
   },
@@ -111,31 +101,20 @@
   },
   "size-limit": [
     {
-      "name": "Core",
-      "path": "dist/index.js",
-      "import": "{ StateMachine, StateRegistry }",
-      "limit": "12 KB"
+      "name": "Core only",
+      "path": "dist/index.mjs",
+      "import": "{ createMachine }",
+      "limit": "6 KB"
     },
     {
       "name": "React hooks",
-      "path": "dist/react.js",
-      "limit": "5 KB"
+      "path": "dist/react.mjs",
+      "limit": "3 KB"
     },
     {
       "name": "Sync WS",
       "path": "dist/sync-ws.js",
       "limit": "4 KB"
-    },
-    {
-      "name": "Next plugin core",
-      "path": "dist/next.mjs",
-      "import": "{ createMachine }",
-      "limit": "6 KB"
-    },
-    {
-      "name": "Next React adapter",
-      "path": "dist/next-react.mjs",
-      "limit": "3 KB"
     },
     {
       "name": "Full bundle",

@@ -1,7 +1,7 @@
 /*
  *   IMPORTS
  ***************************************************************************************************/
-import { DevToolsConnector, type DevToolsConfig } from '../../devtools'
+import { DevToolsConnector, type DevToolsConfig } from '../devtools'
 import type { Plugin } from '../core'
 
 /*

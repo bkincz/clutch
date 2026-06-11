@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createMachine, MachineError, type PluginContext } from '../next/core'
-import { validate } from '../next/plugins/validate'
+import { createMachine, MachineError, type PluginContext } from '../core'
+import { validate } from '../plugins/validate'
 
 interface TestState {
 	count: number
@@ -8,7 +8,7 @@ interface TestState {
 
 const initialState = (): TestState => ({ count: 0 })
 
-describe('next/plugins/validate', () => {
+describe('plugins/validate', () => {
 	it('requires a validator function', () => {
 		expect(() => validate(null as unknown as () => boolean)).toThrow(MachineError)
 	})

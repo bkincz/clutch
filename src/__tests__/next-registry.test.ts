@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createMachine, MachineError } from '../next/core'
-import { createRegistry } from '../next/registry'
-import { history } from '../next/plugins/history'
-import { persist, type PersistStorage } from '../next/plugins/persist'
-import { autosave } from '../next/plugins/autosave'
+import { createMachine, MachineError } from '../core'
+import { createRegistry } from '../registry'
+import { history } from '../plugins/history'
+import { persist, type PersistStorage } from '../plugins/persist'
+import { autosave } from '../plugins/autosave'
 
 interface UserState {
 	name: string
@@ -27,7 +27,7 @@ const createMemoryStorage = (): PersistStorage & { store: Map<string, string> } 
 	}
 }
 
-describe('next/registry', () => {
+describe('registry', () => {
 	describe('combined state', () => {
 		it('combines member states under their keys', () => {
 			const registry = createRegistry({

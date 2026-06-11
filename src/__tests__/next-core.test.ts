@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
-import { createMachine, MachineError, type Plugin, type PluginContext } from '../next/core'
-import { history } from '../next/plugins/history'
+import { createMachine, MachineError, type Plugin, type PluginContext } from '../core'
+import { history } from '../plugins/history'
 
 interface TestState {
 	count: number
@@ -9,7 +9,7 @@ interface TestState {
 
 const initialState = (): TestState => ({ count: 0, name: 'test' })
 
-describe('next/core Machine', () => {
+describe('core Machine', () => {
 	it('mutates state and notifies subscribers', () => {
 		const machine = createMachine({ initialState: initialState() })
 		const listener = vi.fn()
@@ -239,7 +239,7 @@ describe('next/core Machine', () => {
 	})
 })
 
-describe('next/plugins/history', () => {
+describe('plugins/history', () => {
 	const setup = (maxSize?: number) =>
 		createMachine({ initialState: initialState() }).with(history<TestState>({ maxSize }))
 

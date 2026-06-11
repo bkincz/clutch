@@ -10,6 +10,7 @@ export interface AutosaveConfig<T> {
 	save: (state: T) => void | Promise<void>
 	load?: () => T | null | Promise<T | null>
 	intervalMs?: number
+	auto?: boolean
 }
 
 export interface AutosaveApi {
@@ -69,7 +70,7 @@ export function autosave<T extends object>(config: AutosaveConfig<T>): Plugin<T,
 	}
 
 	const startTimer = (): void => {
-		if (typeof window === 'undefined' || destroyed) {
+		if (typeof window === 'undefined' || destroyed || !(config.auto ?? true)) {
 			return
 		}
 

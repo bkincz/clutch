@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createMachine, type PluginContext } from '../next/core'
-import { persist, type PersistStorage } from '../next/plugins/persist'
-import { history } from '../next/plugins/history'
+import { createMachine, type PluginContext } from '../core'
+import { persist, type PersistStorage } from '../plugins/persist'
+import { history } from '../plugins/history'
 
 interface TestState {
 	count: number
@@ -34,7 +34,7 @@ const createMemoryStorage = (): MemoryStorage => {
 	}
 }
 
-describe('next/plugins/persist', () => {
+describe('plugins/persist', () => {
 	let storage: MemoryStorage
 
 	const readStored = (): { state: Partial<TestState>; timestamp: number } | null => {

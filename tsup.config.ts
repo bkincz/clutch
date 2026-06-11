@@ -3,10 +3,8 @@ import { defineConfig } from 'tsup'
 export default defineConfig({
 	entry: {
 		index: 'src/index.ts',
-		react: 'src/integrations/react/index.ts',
+		react: 'src/react.ts',
 		'sync-ws': 'src/transports/websocket.ts',
-		next: 'src/next/index.ts',
-		'next-react': 'src/next/react.ts',
 	},
 	format: ['cjs', 'esm'],
 	dts: true,

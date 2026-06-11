@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createMachine, type PluginContext } from '../next/core'
-import { devtools } from '../next/plugins/devtools'
-import { history } from '../next/plugins/history'
+import { createMachine, type PluginContext } from '../core'
+import { devtools } from '../plugins/devtools'
+import { history } from '../plugins/history'
 
 interface TestState {
 	count: number
@@ -16,7 +16,7 @@ type DispatchMessage = {
 	state?: string
 }
 
-describe('next/plugins/devtools', () => {
+describe('plugins/devtools', () => {
 	let mockConnection: {
 		init: ReturnType<typeof vi.fn>
 		send: ReturnType<typeof vi.fn>

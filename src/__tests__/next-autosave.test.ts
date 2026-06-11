@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { createMachine, MachineError } from '../next/core'
-import { autosave } from '../next/plugins/autosave'
-import { history } from '../next/plugins/history'
+import { createMachine, MachineError } from '../core'
+import { autosave } from '../plugins/autosave'
+import { history } from '../plugins/history'
 
 interface TestState {
 	count: number
@@ -11,7 +11,7 @@ const initialState = (): TestState => ({ count: 0 })
 
 const INTERVAL = 1000
 
-describe('next/plugins/autosave', () => {
+describe('plugins/autosave', () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
 	})
