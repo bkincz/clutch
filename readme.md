@@ -5,7 +5,9 @@
 [![npm version](https://badge.fury.io/js/@bkincz%2Fclutch.svg)](https://badge.fury.io/js/@bkincz%2Fclutch)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A TypeScript-first state manager built on Immer with undo/redo, persistence, and debugging tools.
+A TypeScript-first, plugin-based state manager built on Immer. The core does immutable updates and subscriptions. Everything else, like undo/redo, persistence, sync, and DevTools, is a plugin you opt into. You only ship what you use.
+
+Coming from v2? See the [migration guide](./docs/migration-v3.md).
 
 ## Installation
 
@@ -22,677 +24,279 @@ yarn add @bkincz/clutch
 ## Quick Start
 
 ```typescript
-import { createStateMachine } from '@bkincz/clutch'
+import { createMachine } from '@bkincz/clutch'
 
 interface AppState {
   count: number
   todos: string[]
 }
 
-const state = createStateMachine<AppState>({
-  initialState: { count: 0, todos: [] }
+const machine = createMachine<AppState>({
+  initialState: { count: 0, todos: [] },
 })
 
-// Mutate state with simple, mutable-style code
-state.mutate(draft => {
+// Write mutable-style code, get immutable state back
+machine.mutate(draft => {
   draft.count++
   draft.todos.push('Learn Clutch')
 })
 
-// Undo/Redo out of the box
-state.undo()
-state.redo()
+machine.getState() // { count: 1, todos: ['Learn Clutch'] }
+
+const unsubscribe = machine.subscribe(state => console.log(state))
 ```
 
-Prefer classes? `new StateMachine({ ... })` works too. You only need to subclass when you want to override the server persistence hooks.
+The core machine has `mutate`, `batch`, `getState`, `subscribe`, `reset`, and `destroy`. That is all. Features come from plugins.
 
-## Core Features
+## Plugins
 
-### Immutable Updates
-
-Powered by Immer. Write simple mutations, get immutable state back.
+Install plugins with `.with()`. Each plugin adds its methods to the machine, and to its TypeScript type. Calling a method from a plugin you never installed is a compile error, not a runtime surprise.
 
 ```typescript
-// Instead of this
-const newState = {
-  ...state,
-  todos: state.todos.map(todo =>
-    todo.id === id ? { ...todo, completed: true } : todo
-  )
-}
+import { createMachine, history, persist, devtools } from '@bkincz/clutch'
 
-// Write this
-state.mutate(draft => {
-  const todo = draft.todos.find(t => t.id === id)
-  if (todo) todo.completed = true
-})
+const machine = createMachine<AppState>({ initialState })
+  .with(history<AppState>({ maxSize: 50 }))
+  .with(persist<AppState>({ key: 'app' }))
+  .with(devtools<AppState>({ name: 'App' }))
+
+machine.undo()   // from history
+machine.flush()  // from persist
 ```
 
-### Undo/Redo
+| Plugin | What it adds |
+|---|---|
+| `history()` | Undo/redo with patch-based history |
+| `persist()` | localStorage persistence with debounced writes |
+| `devtools()` | Redux DevTools integration with time travel |
+| `sync()` | State sync across tabs or via WebSocket |
+| `validate()` | Rejects commits that fail your validator |
+| `autosave()` | Periodic and manual saving to your server |
 
-Built-in history management using efficient patch-based storage.
+Plugin order matters in one case: install `persist` before `sync` so hydration happens before the first sync exchange.
+
+### history
 
 ```typescript
-state.mutate(draft => { draft.count++ }, 'increment')
-state.mutate(draft => { draft.count++ }, 'increment')
-
-state.undo() // count is back to 1
-state.redo() // count is 2 again
-
-state.clearHistory() // start fresh
+machine.with(history<AppState>({ maxSize: 50 })) // default 50
 ```
 
-### Batch Operations
+Adds `undo()`, `redo()`, `canUndo()`, `canRedo()`, `getHistoryInfo()`, and `clearHistory()`. Undo and redo return `false` when there is nothing to apply.
 
-Group multiple changes into a single undo/redo step.
+`getHistoryInfo()` returns `{ canUndo, canRedo, historyLength, currentIndex, lastAction }` and is referentially stable between history changes, so it is safe to use as a `useSyncExternalStore` snapshot.
+
+### persist
 
 ```typescript
-state.batch([
-  draft => { draft.count++ },
-  draft => { draft.todos.push('New todo') },
-  draft => { draft.loading = false }
-], 'bulk update')
+machine.with(persist<AppState>({
+  key: 'app',                       // required, the storage key
+  debounceMs: 300,                  // default 300
+  maxChars: 5 * 1024 * 1024,        // refuse to write larger payloads
+  storage: customStorage,           // anything with getItem/setItem/removeItem
+  filter: { exclude: ['draft'] },   // or { include: [...] } or { custom: state => ... }
+  deferred: false,                  // see SSR below
+}))
 ```
 
-### Persistence
+Adds `hydrate()`, `isHydrated()`, `flush()`, and `clearPersisted()`. State is loaded on install and written on a debounce after every change. `flush()` forces a pending write immediately. Writes also flush on `pagehide` and `destroy()`.
 
-Automatic localStorage backup with optional server sync.
+**SSR:** pass `deferred: true` to skip hydration on install, then call `hydrate()` on the client after mount (or use the `useHydration` React hook). Without a browser storage available the plugin is inert, so creating machines on the server is safe.
+
+### devtools
 
 ```typescript
-const state = createStateMachine({
-  initialState: { count: 0 },
-  persistenceKey: 'my-app',
-  autoSaveIntervalMs: 5 * 60 * 1000 // auto-save every 5 minutes
-})
-
-// Optional: add server persistence
-class MyState extends StateMachine<AppState> {
-  protected async saveToServer(state: AppState): Promise<void> {
-    await fetch('/api/state', {
-      method: 'POST',
-      body: JSON.stringify(state)
-    })
-  }
-
-  protected async loadFromServer(): Promise<AppState | null> {
-    const res = await fetch('/api/state')
-    return res.ok ? res.json() : null
-  }
-}
+machine.with(devtools<AppState>({ name: 'App', maxAge: 50 }))
 ```
 
-> `saveToServer`/`loadFromServer` are for periodic backup and restore. If you want *live* state sync between clients, that's what [Server Sync (WebSocket)](#server-sync-websocket) is for.
+Connects to the [Redux DevTools Extension](https://github.com/reduxjs/redux-devtools). Every commit, undo, sync update, and hydration shows up in the timeline. Time travel from the extension updates the machine. Adds no methods.
 
-## Advanced Features
-
-### Middleware
-
-Intercept mutations for validation, logging, or transformation.
+### sync
 
 ```typescript
-import { Middleware } from '@bkincz/clutch'
-
-// Validation middleware
-const validateCount: Middleware<AppState> = (ctx, next, draft) => {
-  next(draft)
-  if (draft.count < 0) {
-    throw new Error('Count cannot be negative')
-  }
-}
-
-// Logging middleware
-const logger: Middleware<AppState> = (ctx, next, draft) => {
-  console.log('Before:', ctx.state)
-  next(draft)
-  console.log('After:', draft)
-}
-
-const state = new StateMachine({
-  initialState: { count: 0 },
-  middleware: [validateCount, logger]
-})
+machine.with(sync<AppState>({
+  channel: 'my-app',            // BroadcastChannel name, for cross-tab sync
+  mergeStrategy: 'latest',      // or 'patches'
+  syncDebounce: 50,
+  transport: customTransport,   // bring your own, e.g. WebSocket
+  autoStart: true,
+}))
 ```
 
-Middleware runs in order, Express style. Whatever you do before `next(draft)` happens before the mutation, whatever comes after runs on the way back out.
-
-### Selective Persistence
-
-Exclude sensitive fields from localStorage.
+Adds `startSync()`. By default sync uses a `BroadcastChannel` and starts on install. For server sync, pass the WebSocket transport:
 
 ```typescript
-interface AppState {
-  user: { name: string; email: string }
-  authToken: string
-  preferences: object
-}
-
-const state = new StateMachine({
-  initialState: { ... },
-  persistenceKey: 'my-app',
-
-  // Option 1: Exclude specific fields
-  persistenceFilter: {
-    exclude: ['authToken']
-  },
-
-  // Option 2: Include only specific fields
-  persistenceFilter: {
-    include: ['user', 'preferences']
-  },
-
-  // Option 3: Custom filter function
-  persistenceFilter: {
-    custom: (state) => ({
-      user: { name: state.user.name }, // exclude email
-      preferences: state.preferences
-    })
-  }
-})
-```
-
-Excluded fields automatically fall back to `initialState` when loaded from localStorage.
-
-### DevTools Integration
-
-Connect to Redux DevTools browser extension for time-travel debugging.
-
-```typescript
-const state = new StateMachine({
-  initialState: { count: 0 },
-
-  // Simple: enable with defaults
-  enableDevTools: true,
-
-  // Advanced: customize behavior
-  enableDevTools: {
-    name: 'MyApp',           // Name in DevTools
-    maxAge: 50,              // Max actions to keep
-    latency: 500,            // Debounce updates
-    features: {
-      jump: true,            // Enable time-travel
-      skip: false,
-      export: true,
-      import: false
-    }
-  }
-})
-```
-
-If the extension isn't installed, nothing breaks.
-
-### StateRegistry (Multi-Machine Management)
-
-Consolidate multiple state machines into a single coordinated store.
-
-```typescript
-import { StateMachine, StateRegistry } from '@bkincz/clutch'
-
-// Define your state types
-type UserState = { name: string; email: string }
-type TodosState = { items: { id: string; text: string }[] }
-
-// Define the store's machine registry
-type AppMachines = {
-  user: UserState
-  todos: TodosState
-}
-
-// Create individual machines
-class UserMachine extends StateMachine<UserState> {
-  constructor() {
-    super({ initialState: { name: '', email: '' } })
-  }
-}
-
-class TodosMachine extends StateMachine<TodosState> {
-  constructor() {
-    super({ initialState: { items: [] } })
-  }
-}
-
-// Create store and register machines
-const store = new StateRegistry<AppMachines>()
-store.register('user', new UserMachine())
-store.register('todos', new TodosMachine())
-
-// Get combined state from all machines
-const state = store.getState()
-// { user: { name: '', email: '' }, todos: { items: [] } }
-
-// Subscribe to any machine's changes
-store.subscribe((combinedState) => {
-  console.log('Something changed:', combinedState)
-})
-
-// Coordinated operations across all machines
-store.resetAll()        // Reset all machines to initial state
-store.clearAllHistory() // Clear undo history on all machines
-store.forceSaveAll()    // Persist all machines
-store.destroyAll()      // Clean up everything
-```
-
-> **Note:** When defining your machine registry type, use `type` instead of `interface` for TypeScript compatibility.
-
-### Multi-Instance Sync
-
-Sync state across browser tabs using BroadcastChannel.
-
-```typescript
-const state = new StateMachine({
-  initialState: { count: 0 },
-
-  // Simple: enable with defaults
-  enableSync: true,
-
-  // Advanced: customize behavior
-  enableSync: {
-    channel: 'my-app-sync',      // BroadcastChannel name
-    syncDebounce: 50,             // Debounce updates (ms)
-    mergeStrategy: 'patches'      // 'patches' or 'latest'
-  }
-})
-```
-
-Changes in one tab show up in the others. `'patches'` sends just the diff, `'latest'` sends the whole state. Runs in the background and quietly does nothing in environments without BroadcastChannel.
-
-> **Note:** With `deferredHydration: true`, sync starts when `hydrateFromPersisted()` is
-> called rather than at construction, so remote updates can never overwrite persisted state
-> before it has been loaded.
-
-The transport is pluggable. Pass any `SyncTransport` implementation to route sync
-messages somewhere else:
-
-```typescript
-import type { SyncTransport } from '@bkincz/clutch'
-
-const state = new StateMachine({
-  initialState: { count: 0 },
-  enableSync: { transport: myCustomTransport }, // defaults to BroadcastChannelTransport
-})
-```
-
-### Server Sync (WebSocket)
-
-Want sync across actual machines, not just tabs? Point Clutch at a WebSocket server.
-It lives in its own `@bkincz/clutch/sync-ws` entry, so it costs nothing unless you import it.
-
-```typescript
-import { StateMachine } from '@bkincz/clutch'
 import { WebSocketTransport } from '@bkincz/clutch/sync-ws'
 
-const state = new StateMachine({
-  initialState: { count: 0 },
-  enableSync: {
-    mergeStrategy: 'patches',
-    transport: new WebSocketTransport({
-      url: 'wss://example.com/sync',
-      getAuthToken: () => myAuth.getToken(), // optional, sync or async
-      onError: err => reportError(err),      // operational errors (reconnect gave up, queue overflow)
-    }),
-  },
-})
+machine.with(sync<AppState>({
+  transport: new WebSocketTransport({ url: 'wss://example.com/sync' }),
+}))
 ```
 
-| Option                | Default   | Description                                                     |
-| --------------------- | --------- | --------------------------------------------------------------- |
-| `url`                 | -         | WebSocket server URL                                            |
-| `protocols`           | -         | WebSocket subprotocols                                          |
-| `webSocketCtor`       | global    | Custom constructor, pass `require('ws')` in Node                |
-| `reconnect`           | `{}`      | `false` to disable, or `{ maxRetries, baseDelayMs, maxDelayMs }` |
-| `heartbeatIntervalMs` | `30000`   | Ping interval, `0` disables                                     |
-| `heartbeatTimeoutMs`  | `10000`   | Close and reconnect if no reply within this window              |
-| `maxQueueSize`        | `100`     | Outgoing messages queued while offline (drop-oldest)            |
-| `getAuthToken`        | -         | Token provider, sync or async                                   |
-| `authMode`            | `'query'` | `'query'` appends `?token=...`, `'message'` sends an auth frame |
-| `onError`             | -         | Operational error callback                                      |
+With deferred persistence, pass `autoStart: false` and call `startSync()` after `hydrate()`, so a remote response cannot race your locally persisted state. The wire format is documented in [docs/sync-protocol.md](./docs/sync-protocol.md).
 
-Reconnection with backoff, heartbeats, and offline queueing are all handled for you.
-Your server just needs to stamp each message with an incrementing version and broadcast
-it to everyone, including the sender. That's about 30 lines in any language, and it never
-has to understand your state shape. Full wire spec and reference pseudocode in
-[docs/sync-protocol.md](docs/sync-protocol.md).
-
-> **Heads up:** server-synced state has to be JSON-serializable. `Date`/`Map`/`Set`
-> survive cross-tab structured clone but not JSON.
-
-### Lifecycle Events
-
-Subscribe to state changes, errors, and cleanup.
+### validate
 
 ```typescript
-// Subscribe to mutations
-const unsubscribe = state.on('afterMutate', (payload) => {
-  console.log(`[${payload.operation}] ${payload.description}`)
-  console.log('Patches:', payload.patches)
-  console.log('New state:', payload.state)
-})
-
-// Subscribe to errors
-state.on('error', (payload) => {
-  console.error(`Error in ${payload.operation}:`, payload.error)
-})
-
-// Subscribe to cleanup
-state.on('destroy', (payload) => {
-  console.log('Final state:', payload.finalState)
-})
-
-// Cleanup when done
-unsubscribe()
+machine.with(validate<AppState>(state => state.count >= 0))
 ```
 
-**Available Events:**
-- `afterMutate` - After any successful mutation (mutate, batch, undo, redo)
-- `error` - When a mutation or persistence operation fails
-- `destroy` - Before the state machine is cleaned up
+A failing validator makes `mutate` and `batch` throw before any state is applied. Updates arriving from outside (sync, hydration) are already applied when plugins see them, so those are reported through `onError` instead of rejected.
 
-### SSR / Deferred Hydration
-
-Prevent hydration mismatches in Next.js, Remix, and other SSR frameworks.
-
-The server renders `initialState`, the client hydrates with whatever was in localStorage, and React complains about the mismatch. Set `deferredHydration: true` and the machine waits until first client mount to load persisted state. `useStateMachine` and `useStateSlice` handle it automatically.
+### autosave
 
 ```typescript
-class CartMachine extends StateMachine<CartState> {
-  constructor() {
-    super({
-      initialState: { items: [] },
-      persistenceKey: 'cart',
-      deferredHydration: true   // skip localStorage in constructor
-    })
-  }
-}
+machine.with(autosave<AppState>({
+  save: state => api.put('/state', state),   // required
+  load: () => api.get('/state'),             // optional
+  intervalMs: 5 * 60 * 1000,                 // default 5 minutes
+  auto: true,                                // false = manual forceSave only
+}))
 ```
+
+Adds `forceSave()`, `hasUnsavedChanges()`, `setAutoSaveInterval(ms)`, and `loadFromServer()`. Only local mutations mark the state dirty. Undo and incoming sync updates do not, since that data is already saved somewhere. A failed save stays dirty and retries on the next interval.
+
+## Reset
+
+`machine.reset()` returns to the initial state. History clears and persistence rewrites. Resets are not broadcast to sync peers.
+
+## Registry
+
+Group machines and read them as one combined state:
+
+```typescript
+import { createMachine, createRegistry, history, persist } from '@bkincz/clutch'
+
+const registry = createRegistry({
+  user: createMachine<UserState>({ initialState: userInit }).with(history<UserState>()),
+  cart: createMachine<CartState>({ initialState: cartInit }).with(persist<CartState>({ key: 'cart' })),
+})
+
+registry.getState()             // { user: UserState, cart: CartState }
+registry.subscribe(combined => { ... })
+
+registry.machines.user.undo()   // typed, plugin methods are preserved per machine
+```
+
+Coordination methods only reach machines that have the matching plugin installed:
+
+| Method | Reaches |
+|---|---|
+| `resetAll()` | every machine |
+| `hydrateAll()` / `flushAll()` | machines with `persist` |
+| `forceSaveAll()` / `hasUnsavedChanges()` | machines with `autosave` |
+| `clearAllHistory()` | machines with `history` |
+| `destroyAll()` | every machine |
+
+The machine map is fixed at creation. There is no `register`/`unregister`.
+
+## React
+
+Hooks live in `@bkincz/clutch/react`. The main entry stays React-free.
 
 ```tsx
-// No extra wiring needed, hydration is automatic
-function Cart() {
-  const { state, mutate } = useStateMachine(cartMachine)
-  return <div>{state.items.length} items</div>
-}
-```
-
-Want to avoid a flash of stale state? Gate your UI with `useDeferredHydration`:
-
-```tsx
-function App() {
-  const { isHydrated } = useDeferredHydration(cartMachine)
-  if (!isHydrated) return <Skeleton />
-  return <Cart />
-}
-```
-
-> `isHydrated` is always `true` for machines without `deferredHydration: true`.
-
-## React Hooks
-
-> **Note:** React hooks are imported from `@bkincz/clutch/react`.
-
-### `useStateMachine(state)`
-
-Subscribe to entire state.
-
-```typescript
-import { useStateMachine } from '@bkincz/clutch/react'
+import { useMachine, useSlice } from '@bkincz/clutch/react'
 
 function Counter() {
-  const { state, mutate } = useStateMachine(todoState)
+  const { state, mutate } = useMachine(machine)
+  return <button onClick={() => mutate(d => { d.count++ })}>{state.count}</button>
+}
 
-  return (
-    <button onClick={() => mutate(draft => { draft.count++ })}>
-      Count: {state.count}
-    </button>
-  )
+function CountLabel() {
+  // re-renders only when the selected value changes
+  const count = useSlice(machine, s => s.count)
+  return <span>{count}</span>
 }
 ```
 
-### `useStateSlice(state, selector)`
+| Hook | Needs | Returns |
+|---|---|---|
+| `useMachine(machine)` | core | `{ state, mutate, batch }` |
+| `useSlice(machine, selector, equalityFn?)` | core | the selected value |
+| `useSubscription(machine, callback)` | core | nothing, runs your callback on changes |
+| `useRegistry(registry)` | registry | combined state |
+| `useRegistrySlice(registry, selector, equalityFn?)` | registry | the selected value |
+| `useMachineHistory(machine)` | `history` plugin | history info plus `undo`, `redo`, `clearHistory` |
+| `useHydration(machine)` | `persist` plugin | `{ isHydrated }`, hydrates on mount |
+| `useAutosave(machine)` | `autosave` plugin | `save`, `load`, `isSaving`, `saveError`, `hasUnsavedChanges`, ... |
 
-Subscribe to a slice for better performance.
+The plugin hooks require the plugin's methods on the machine type. Passing a machine without that plugin fails to compile.
+
+## Writing a Plugin
+
+A plugin is an object with a name and lifecycle hooks. Whatever `onInit` returns is merged onto the machine and shows up in its type.
 
 ```typescript
-const todoCount = useStateSlice(state, s => s.todos.length)
-const completedTodos = useStateSlice(state, s => s.todos.filter(t => t.completed))
+import type { Plugin } from '@bkincz/clutch'
+
+function logger<T extends object>(): Plugin<T, { getLogCount(): number }> {
+  let count = 0
+  return {
+    name: 'logger',
+    onInit: () => ({ getLogCount: () => count }),
+    onCommit: payload => {
+      count++
+      console.log(payload.description ?? payload.operation, payload.patches)
+    },
+  }
+}
+
+const machine = createMachine({ initialState }).with(logger())
+machine.getLogCount()
 ```
 
-### `useStateActions(state)`
+Available hooks:
 
-Get mutation methods without subscribing.
+- `onInit(ctx)` runs at install. Return an object to extend the machine. `ctx` gives you `getState`, `subscribe`, `replaceState`, `applyPatches`, and `emitError`.
+- `onBeforeCommit(payload)` runs before a mutation is applied. Throw to reject it.
+- `onCommit(payload)` runs after a mutation is applied, before subscribers are notified. The payload has the new state, patches, inverse patches, description, and operation.
+- `onExternalState(state, meta)` runs when state changes outside the mutation path: sync updates, hydration, undo, time travel, reset. `meta.source` names the plugin that caused it. Your own changes via `ctx.replaceState` are not echoed back to you.
+- `onError(error, operation)` receives errors from any plugin.
+- `onDestroy(finalState)` runs on `machine.destroy()`, in reverse install order.
 
-```typescript
-const { mutate, batch, undo, redo } = useStateActions(state)
-```
+Plugin names must be unique per machine, and extension keys must not collide with existing methods. Both throw at install time.
 
-### `useStateHistory(state)`
+## Migrating from v2
 
-Access undo/redo controls.
-
-```typescript
-const { canUndo, canRedo, undo, redo } = useStateHistory(state)
-```
-
-### `useStatePersist(state)`
-
-Handle persistence operations.
+`createV2Machine` accepts a v2 config and assembles the matching plugins, so most code only changes one import:
 
 ```typescript
-const { save, load, isSaving, hasUnsavedChanges } = useStatePersist(state)
-```
+import { createV2Machine } from '@bkincz/clutch'
 
-### `useDeferredHydration(state)`
-
-Reactive hydration status for machines with `deferredHydration: true`. Hydration itself is automatic, this hook is just for gating UI on it.
-
-```typescript
-const { isHydrated } = useDeferredHydration(cartMachine)
-```
-
-### `useLifecycleEvent(state, event, listener)`
-
-Subscribe to lifecycle events with automatic cleanup.
-
-```typescript
-useLifecycleEvent(state, 'afterMutate', (payload) => {
-  console.log('State changed:', payload.state)
+const machine = createV2Machine({
+  initialState,
+  persistenceKey: 'app',
+  maxHistorySize: 50,
+  enableDevTools: true,
+  saveToServer: state => api.put('/state', state),  // replaces subclassing
 })
 ```
 
-### `createStateMachineHooks(state)`
-
-Create pre-bound hooks for convenience.
-
-```typescript
-import { createStateMachineHooks } from '@bkincz/clutch/react'
-
-const hooks = createStateMachineHooks(todoState)
-
-function TodoApp() {
-  const { state, mutate } = hooks.useState()
-  const { canUndo, undo } = hooks.useHistory()
-
-  hooks.useLifecycle('afterMutate', (payload) => {
-    console.log('Changed:', payload.description)
-  })
-
-  return <div>...</div>
-}
-```
-
-### `useRegistry(store)`
-
-Subscribe to combined state from a `StateRegistry`.
-
-```typescript
-const state = useRegistry(store)
-// { user: { name: '', email: '' }, todos: { items: [] } }
-```
-
-### `useRegistrySlice(store, selector)`
-
-Subscribe to a slice of combined state for better performance.
-
-```typescript
-const userName = useRegistrySlice(store, s => s.user.name)
-const todoCount = useRegistrySlice(store, s => s.todos.items.length)
-```
-
-### `useRegistryMachine(store, machineName)`
-
-Subscribe to a specific machine's state.
-
-```typescript
-const userState = useRegistryMachine(store, 'user')
-const todosState = useRegistryMachine(store, 'todos')
-```
-
-### `useRegistryActions(store)`
-
-Get registry-wide actions without subscribing.
-
-```typescript
-const { resetAll, forceSaveAll, clearAllHistory, destroyAll } = useRegistryActions(store)
-```
-
-### `createRegistryHooks(store)`
-
-Create pre-bound hooks for a specific `StateRegistry`.
-
-```typescript
-import { createRegistryHooks } from '@bkincz/clutch/react'
-
-const hooks = createRegistryHooks(store)
-
-function App() {
-  const state = hooks.useRegistry()
-  const userState = hooks.useMachine('user')
-  const { resetAll } = hooks.useActions()
-
-  return <div>...</div>
-}
-```
-
-## Configuration
-
-```typescript
-interface StateConfig<T> {
-  // Required
-  initialState: T
-
-  // Persistence
-  persistenceKey?: string              // localStorage key
-  persistenceFilter?: PersistenceFilter<T> // exclude/include/custom
-  enablePersistence?: boolean          // default: true
-  autoSaveIntervalMs?: number          // default: 300000 (5 minutes)
-  enableAutoSave?: boolean             // default: true
-
-  // History
-  maxHistorySize?: number              // default: 50
-
-  // Middleware
-  middleware?: Middleware<T>[]
-
-  // DevTools
-  enableDevTools?: boolean | DevToolsConfig
-
-  // Sync
-  enableSync?: boolean | SyncConfig
-
-  // SSR
-  deferredHydration?: boolean          // skip localStorage in constructor, default: false
-
-  // Validation & Debugging
-  validateState?: (state: T) => boolean
-  enableLogging?: boolean              // default: false
-}
-```
-
-## API Reference
-
-### Core Methods
-
-```typescript
-getState(): T                          // Get current state
-mutate(recipe, description?)           // Update state
-batch(mutations, description?)         // Batch multiple mutations
-subscribe(listener)                    // Subscribe to changes
-undo(): boolean                        // Undo last operation
-redo(): boolean                        // Redo next operation
-destroy()                              // Clean up resources
-```
-
-### Lifecycle Methods
-
-```typescript
-on(event, listener): () => void        // Subscribe to events
-```
-
-### Persistence Methods
-
-```typescript
-forceSave(): Promise<void>             // Immediately save
-hasUnsavedChanges(): boolean           // Check unsaved changes
-loadFromServerManually(): Promise<boolean> // Manual server load
-hydrateFromPersisted(): void           // Load localStorage (deferred hydration only)
-isHydrated: boolean                    // false until hydrateFromPersisted() runs
-```
-
-### History Methods
-
-```typescript
-getHistoryInfo(): StateHistoryInfo    // Get history state
-clearHistory(): void                   // Clear undo/redo
-canUndo(): boolean                     // Check if undo available
-canRedo(): boolean                     // Check if redo available
-```
-
-### Reset Methods
-
-```typescript
-reset(): void                          // Reset to initial state
-getInitialState(): T                   // Get the initial state
-```
-
-### StateRegistry Methods
-
-```typescript
-register(name, machine)                // Register a machine
-unregister(name)                       // Remove a machine
-getMachine(name)                       // Get a registered machine
-getMachineNames()                      // List all machine names
-getState()                             // Get combined state
-getMachineState(name)                  // Get specific machine state
-subscribe(listener)                    // Subscribe to any change
-subscribeToMachine(name, listener)     // Subscribe to specific machine
-resetAll()                             // Reset all machines
-forceSaveAll()                         // Save all machines
-clearAllHistory()                      // Clear all history
-destroyAll()                           // Destroy all machines
-```
-
-## Performance
-
-- Core is under 10KB brotlied, Immer included
-- Undo/redo stores patches, not full state snapshots
-- Slice subscriptions only re-render when the selected value actually changes
-- localStorage writes are debounced instead of firing on every mutation
-- React, WebSocket sync, and DevTools cost nothing unless you use them
+Details, the full option-to-plugin mapping, and behavior changes are in the [migration guide](./docs/migration-v3.md).
 
 ## TypeScript
 
-Fully typed with automatic inference.
+State types are inferred from `initialState`, or pass them explicitly: `createMachine<AppState>(...)`. Each `.with()` call widens the machine type with the plugin's API, so autocomplete always matches what is actually installed.
 
 ```typescript
-const state = new StateMachine({
-  initialState: { count: 0, name: 'John' }
-})
+const machine = createMachine<AppState>({ initialState })
+  .with(history<AppState>())
 
-// TypeScript knows the exact shape
-state.mutate(draft => {
-  draft.count++      // ✓ number
-  draft.name = 'Jane' // ✓ string
-  draft.age = 25     // ✗ Property 'age' does not exist
-})
+machine.undo()      // ok
+machine.hydrate()   // compile error, persist is not installed
 ```
+
+## Bundle Size
+
+Sizes are minified and brotli compressed, including Immer.
+
+| Import | Size |
+|---|---|
+| `{ createMachine }` only | ~4.5 KB |
+| Everything | ~8.4 KB |
+| React hooks (`/react`) | ~0.8 KB |
+| WebSocket transport (`/sync-ws`) | ~1.1 KB |
+
+Plugins you do not import are tree-shaken away.
 
 ## License
 

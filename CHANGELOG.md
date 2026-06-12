@@ -1,5 +1,60 @@
 # Changelog
 
+## 3.0.0 - 2026-06-11
+
+The plugin release. The monolithic `StateMachine` is gone from the public API. The core
+now does immutable updates and subscriptions only, and every feature is a plugin you
+install with `.with()`. A counter app pays for a counter app, not for WebSocket sync code.
+
+See the [migration guide](./docs/migration-v3.md).
+
+### Breaking
+
+- **`createStateMachine` / `StateMachine` replaced by `createMachine` + plugins.**
+  Undo/redo, persistence, DevTools, sync, validation, and autosave are now `history()`,
+  `persist()`, `devtools()`, `sync()`, `validate()`, and `autosave()`. Methods only exist
+  on the machine (and in its type) when the plugin is installed.
+- **`createV2Machine(config)` is the bridge.** Takes a v2 `StateConfig`, assembles the
+  matching plugins, and restores the v2 surface including recipe middleware, `on()`,
+  `hydrateFromPersisted()`, and `applyPatchSet()`. Use it to migrate one import now and
+  unwind at your own pace.
+- **Subclassing for server persistence is gone.** `saveToServer`/`loadFromServer`
+  overrides become `autosave({ save, load })` callbacks (also accepted by
+  `createV2Machine`).
+- **`StateRegistry` replaced by `createRegistry(machines)`.** Machines are fixed at
+  creation and typed per entry, so `registry.machines.user.undo()` compiles only when
+  user actually has history. Coordination methods (`forceSaveAll`, `clearAllHistory`, new
+  `hydrateAll`/`flushAll`) only reach machines with the matching plugin.
+- **React hooks renamed.** `useStateMachine` is now `useMachine`, `useStateSlice` is
+  `useSlice`, `useStateHistory` is `useMachineHistory`, `useStatePersist` is
+  `useAutosave`, `useDeferredHydration` is `useHydration`. Hooks no longer hydrate
+  automatically and the plugin hooks type-require their plugin.
+- **`StateMachineError` is now `MachineError`**, same `code` field.
+- **`enableLogging` removed.** No built-in logger in v3.
+
+### Added
+
+- **Public plugin interface.** `Plugin<T, Ext>` with `onInit`, `onBeforeCommit` (throw to
+  veto), `onCommit`, `onExternalState`, `onError`, and `onDestroy`. Whatever `onInit`
+  returns is merged onto the machine and its type. Write your own persistence,
+  transport, or logging in userland.
+- **`persist({ storage })`** accepts any getItem/setItem/removeItem object, so IndexedDB
+  wrappers and test doubles plug straight in.
+- **`sync({ autoStart: false })` + `startSync()`** for SSR flows, replacing v2's hidden
+  hydration/sync ordering with an explicit call.
+- **`autosave({ auto: false })`** for manual-save-only setups.
+
+### Fixed
+
+- **Listeners now fire after plugins update their bookkeeping.** In v2-style setups a
+  React snapshot read during notification could see stale undo/dirty flags. The commit
+  order is now state, plugins, subscribers.
+
+### Sizes
+
+Minified + brotli, Immer included: core-only import 4.5 KB (was 9.8 KB in v2), full
+bundle 8.3 KB, React hooks 0.8 KB.
+
 ## 2.0.0 — 2026-06-10
 
 Performance and simplicity pass. Several breaking changes. no deprecation shims, 

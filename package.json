@@ -1,7 +1,7 @@
 {
   "name": "@bkincz/clutch",
-  "version": "2.0.0",
-  "description": "A production-ready, TypeScript-first state management library built on Immer with advanced features",
+  "version": "3.0.0",
+  "description": "A TypeScript-first, plugin-based state management library built on Immer",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",
   "types": "./dist/index.d.ts",
@@ -101,15 +101,15 @@
   },
   "size-limit": [
     {
-      "name": "Core",
-      "path": "dist/index.js",
-      "import": "{ StateMachine, StateRegistry }",
-      "limit": "12 KB"
+      "name": "Core only",
+      "path": "dist/index.mjs",
+      "import": "{ createMachine }",
+      "limit": "6 KB"
     },
     {
       "name": "React hooks",
-      "path": "dist/react.js",
-      "limit": "5 KB"
+      "path": "dist/react.mjs",
+      "limit": "3 KB"
     },
     {
       "name": "Sync WS",
