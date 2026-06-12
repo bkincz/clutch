@@ -14,6 +14,7 @@ export interface SyncConfig {
 	ignoreLocalChanges?: boolean
 	mergeStrategy?: 'latest' | 'patches'
 	transport?: SyncTransport
+	maxClockSkewMs?: number
 }
 
 type NormalizedSyncConfig = Required<Omit<SyncConfig, 'transport'>> & {
@@ -31,6 +32,39 @@ type SyncMessage<T> = {
 	// Server-assigned monotonic version. When present, ordering is version-based
 	// and timestamp checks are skipped.
 	version?: number
+}
+
+/*
+ *   CONSTANTS
+ ***************************************************************************************************/
+const DEFAULT_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
+
+/*
+ *   UTILITY FUNCTION
+ ***************************************************************************************************/
+function containsDangerousKeys(root: unknown): boolean {
+	const stack: unknown[] = [root]
+	const seen = new WeakSet<object>()
+
+	while (stack.length > 0) {
+		const value = stack.pop()
+		if (!value || typeof value !== 'object') {
+			continue
+		}
+		if (seen.has(value)) {
+			continue
+		}
+		seen.add(value)
+
+		for (const key of Object.keys(value)) {
+			if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+				return true
+			}
+			stack.push((value as Record<string, unknown>)[key])
+		}
+	}
+
+	return false
 }
 
 /*
@@ -68,6 +102,7 @@ export class StateSyncManager<T extends object> {
 			ignoreLocalChanges: config.ignoreLocalChanges ?? false,
 			mergeStrategy: config.mergeStrategy || 'latest',
 			transport: config.transport,
+			maxClockSkewMs: config.maxClockSkewMs ?? DEFAULT_MAX_CLOCK_SKEW_MS,
 		}
 	}
 
@@ -175,9 +210,15 @@ export class StateSyncManager<T extends object> {
 			return
 		}
 
-		const now = Date.now()
-		if (message.timestamp > now + 5000 || message.timestamp < now - 60000) {
-			console.error('[Clutch Sync] Invalid timestamp, possible attack')
+		if (typeof message.timestamp !== 'number' || !Number.isFinite(message.timestamp)) {
+			console.warn('[Clutch Sync] Ignoring message without a valid timestamp')
+			return
+		}
+
+		if (Math.abs(message.timestamp - Date.now()) > this.config.maxClockSkewMs) {
+			console.warn(
+				'[Clutch Sync] Ignoring message outside clock-skew tolerance. If peers run on devices with skewed clocks, raise maxClockSkewMs.'
+			)
 			return
 		}
 
@@ -231,19 +272,8 @@ export class StateSyncManager<T extends object> {
 							return false
 						}
 
-						const stateStr = JSON.stringify(message.state)
-						if (stateStr.includes('__proto__') || stateStr.includes('"constructor"')) {
-							console.error(
-								'[Clutch Sync] Potential prototype pollution detected in state'
-							)
-							return false
-						}
-
-						if (
-							Object.prototype.hasOwnProperty.call(message.state, '__proto__') ||
-							Object.prototype.hasOwnProperty.call(message.state, 'constructor')
-						) {
-							console.error('[Clutch Sync] Detected dangerous properties in state')
+						if (containsDangerousKeys(message.state)) {
+							console.error('[Clutch Sync] Dangerous keys in remote state, rejected')
 							return false
 						}
 
@@ -279,6 +309,13 @@ export class StateSyncManager<T extends object> {
 									console.error('[Clutch Sync] Dangerous property in patch path')
 									return false
 								}
+							}
+
+							if ('value' in patch && containsDangerousKeys(patch.value)) {
+								console.error(
+									'[Clutch Sync] Dangerous keys in patch value, rejected'
+								)
+								return false
 							}
 						}
 

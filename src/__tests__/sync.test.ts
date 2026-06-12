@@ -262,6 +262,84 @@ describe('plugins/sync', () => {
 		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
 	})
 
+	it('accepts states that merely contain "__proto__" inside a string value', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 3, name: 'docs about __proto__ and constructor' },
+			})
+		)
+
+		expect(machine.getState()).toEqual({
+			count: 3,
+			name: 'docs about __proto__ and constructor',
+		})
+	})
+
+	it('rejects patches whose values carry dangerous keys', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'patches',
+				patches: [
+					{
+						op: 'replace',
+						path: ['name'],
+						value: JSON.parse('{"__proto__":{"polluted":true}}'),
+					},
+				],
+			})
+		)
+
+		expect(machine.getState().name).toBe('test')
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+	})
+
+	it('accepts messages within the clock-skew tolerance', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 7, name: 'slow-clock' },
+				timestamp: Date.now() - 2 * 60 * 1000,
+			})
+		)
+
+		expect(machine.getState().count).toBe(7)
+	})
+
+	it('ignores messages outside the configured clock-skew tolerance', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			sync<TestState>({ transport, maxClockSkewMs: 1000 })
+		)
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 7, name: 'skewed' },
+				timestamp: Date.now() - 5000,
+			})
+		)
+
+		expect(machine.getState().count).toBe(0)
+	})
+
+	it('ignores non-versioned messages without a numeric timestamp', () => {
+		const machine = setup()
+
+		transport.receive({
+			type: 'state_update',
+			instanceId: 'remote-instance',
+			state: { count: 7, name: 'no-clock' },
+		})
+
+		expect(machine.getState().count).toBe(0)
+	})
+
 	describe('autoStart: false', () => {
 		it('stays idle until startSync() is called', () => {
 			const machine = createMachine({ initialState: initialState() }).with(

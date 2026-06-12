@@ -246,13 +246,13 @@ describe('StateSyncManager with injected transport', () => {
 		expect(applied).toHaveLength(0)
 	})
 
-	it('should reject messages with out-of-window timestamps', () => {
+	it('should reject messages outside the clock-skew tolerance', () => {
 		createManager()
 
 		transport.deliver(
 			remoteMessage({
 				type: 'state_update',
-				timestamp: Date.now() - 120000,
+				timestamp: Date.now() - 6 * 60 * 1000,
 				state: { count: 9, name: 'old' },
 			})
 		)
