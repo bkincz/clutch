@@ -34,17 +34,6 @@ type SyncMessage<T> = {
 }
 
 /*
- *   UTILITY FUNCTION
- ***************************************************************************************************/
-function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T {
-	let timeout: ReturnType<typeof setTimeout>
-	return ((...args: Parameters<T>) => {
-		clearTimeout(timeout)
-		timeout = setTimeout(() => func(...args), wait)
-	}) as T
-}
-
-/*
  *   STATE SYNC MANAGER
  ***************************************************************************************************/
 export class StateSyncManager<T extends object> {
@@ -54,7 +43,11 @@ export class StateSyncManager<T extends object> {
 	private lastSyncTimestamp = 0
 	private lastVersion: number | null = null
 	private resyncPending = false
-	private debouncedSync: (message: SyncMessage<T>) => void
+	private syncTimer: ReturnType<typeof setTimeout> | null = null
+	private pendingState: T | null = null
+	private pendingPatches: Patch[] = []
+	private pendingInversePatches: Patch[] = []
+	private pendingDescription: string | undefined
 
 	constructor(
 		config: SyncConfig,
@@ -63,7 +56,6 @@ export class StateSyncManager<T extends object> {
 	) {
 		this.instanceId = `instance_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 		this.config = this.normalizeConfig(config)
-		this.debouncedSync = debounce(msg => this.send(msg), this.config.syncDebounce)
 		this.transport =
 			this.config.transport ?? new BroadcastChannelTransport({ channel: this.config.channel })
 		this.initialize()
@@ -112,17 +104,51 @@ export class StateSyncManager<T extends object> {
 			return
 		}
 
-		const message: SyncMessage<T> = {
-			type: this.config.mergeStrategy === 'patches' ? 'patches' : 'state_update',
-			instanceId: this.instanceId,
-			timestamp: Date.now(),
-			state: this.config.mergeStrategy === 'latest' ? state : undefined,
-			patches: this.config.mergeStrategy === 'patches' ? patches : undefined,
-			inversePatches: this.config.mergeStrategy === 'patches' ? inversePatches : undefined,
-			description,
+		if (this.config.mergeStrategy === 'patches') {
+			this.pendingPatches.push(...patches)
+			this.pendingInversePatches.unshift(...inversePatches)
+		} else {
+			this.pendingState = state
+		}
+		this.pendingDescription = description ?? this.pendingDescription
+
+		this.scheduleFlush()
+	}
+
+	private scheduleFlush(): void {
+		if (this.syncTimer) {
+			clearTimeout(this.syncTimer)
 		}
 
-		this.debouncedSync(message)
+		this.syncTimer = setTimeout(() => {
+			this.syncTimer = null
+			this.flushPending()
+		}, this.config.syncDebounce)
+	}
+
+	private flushPending(): void {
+		const isPatches = this.config.mergeStrategy === 'patches'
+
+		if (isPatches ? this.pendingPatches.length === 0 : this.pendingState === null) {
+			return
+		}
+
+		const message: SyncMessage<T> = {
+			type: isPatches ? 'patches' : 'state_update',
+			instanceId: this.instanceId,
+			timestamp: Date.now(),
+			state: isPatches ? undefined : (this.pendingState as T),
+			patches: isPatches ? this.pendingPatches : undefined,
+			inversePatches: isPatches ? this.pendingInversePatches : undefined,
+			description: this.pendingDescription,
+		}
+
+		this.pendingState = null
+		this.pendingPatches = []
+		this.pendingInversePatches = []
+		this.pendingDescription = undefined
+
+		this.send(message)
 	}
 
 	private handleMessage(message: SyncMessage<T>): void {
@@ -316,6 +342,14 @@ export class StateSyncManager<T extends object> {
 	}
 
 	public destroy(): void {
+		if (this.syncTimer) {
+			clearTimeout(this.syncTimer)
+			this.syncTimer = null
+		}
+
+		// Send what's still buffered so peers don't lose the final change
+		this.flushPending()
+
 		this.transport.destroy()
 	}
 }

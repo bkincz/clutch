@@ -111,6 +111,41 @@ describe('plugins/sync', () => {
 		expect(update?.state).toBeUndefined()
 	})
 
+	it('accumulates patches from rapid mutations within the debounce window', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			sync<TestState>({ transport, mergeStrategy: 'patches' })
+		)
+
+		machine.mutate(draft => {
+			draft.count = 1
+		})
+		machine.mutate(draft => {
+			draft.name = 'updated'
+		})
+
+		vi.advanceTimersByTime(50)
+
+		const updates = transport.sent.filter(message => message.type === 'patches')
+		expect(updates).toHaveLength(1)
+		expect(updates[0]?.patches).toEqual([
+			{ op: 'replace', path: ['count'], value: 1 },
+			{ op: 'replace', path: ['name'], value: 'updated' },
+		])
+	})
+
+	it('flushes a pending broadcast on destroy instead of dropping it', () => {
+		const machine = setup()
+
+		machine.mutate(draft => {
+			draft.count = 5
+		})
+
+		machine.destroy()
+
+		const update = transport.sent.find(message => message.type === 'state_update')
+		expect(update).toMatchObject({ state: { count: 5, name: 'test' } })
+	})
+
 	it('applies a remote state update', () => {
 		const machine = setup()
 		const listener = vi.fn()
