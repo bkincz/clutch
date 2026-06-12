@@ -257,21 +257,7 @@ Plugin names must be unique per machine, and extension keys must not collide wit
 
 ## Migrating from v2
 
-`createV2Machine` accepts a v2 config and assembles the matching plugins, so most code only changes one import:
-
-```typescript
-import { createV2Machine } from '@bkincz/clutch'
-
-const machine = createV2Machine({
-  initialState,
-  persistenceKey: 'app',
-  maxHistorySize: 50,
-  enableDevTools: true,
-  saveToServer: state => api.put('/state', state),  // replaces subclassing
-})
-```
-
-Details, the full option-to-plugin mapping, and behavior changes are in the [migration guide](./docs/migration-v3.md).
+The v2 API and the `createV2Machine` bridge were removed in v4. Migrate to the v3 plugin API on `@bkincz/clutch@3` first — the option-to-plugin mapping is in the [migration guide](./docs/migration-v3.md) — then upgrade to v4.
 
 ## TypeScript
 
