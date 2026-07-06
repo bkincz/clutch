@@ -30,14 +30,8 @@ export interface PersistConfig<T> {
 	debounceMs?: number
 	maxChars?: number
 	filter?: PersistFilter<T>
-	/** Wait for an explicit `hydrate()` call instead of hydrating on install. Useful for SSR. */
 	deferred?: boolean
-	/** Version of the persisted shape. Bump it when the shape changes. */
 	version?: number
-	/**
-	 * Upgrades state persisted under an older version. Without it, persisted
-	 * state from a different version is discarded instead of hydrated.
-	 */
 	migrate?: (persisted: Partial<T>, fromVersion: number) => Partial<T>
 }
 

@@ -60,6 +60,10 @@ module.exports = {
         "@typescript-eslint/no-non-null-assertion": "warn",
         // "@typescript-eslint/prefer-const": "error", // Disabled due to configuration issues
         "@typescript-eslint/no-inferrable-types": "error",
+        // The core rule flags TypeScript overload signatures; the TS-aware
+        // version understands them
+        "no-dupe-class-members": "off",
+        "@typescript-eslint/no-dupe-class-members": "error",
       },
     },
     {
