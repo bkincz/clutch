@@ -1,5 +1,17 @@
 # Changelog
 
+## 3.1.0 - 2026-07-06
+
+The micro-frontend release. Added `sharedMachine(key, factory, options?)`:
+creates a machine once per page and returns the same instance to every caller
+of the same key, no matter which bundle asks. Built for independently deployed
+apps sharing one page, like Module Federation remotes. The registry lives on
+`globalThis` and instances are used structurally, so it survives apps bundling
+separate copies of clutch. Pass `{ contract: n }` and clutch warns at runtime
+when two apps disagree on the state shape version; mismatched clutch versions
+across bundles are warned the same way. See the new "Micro frontends" section
+in the README.
+
 ## 3.0.0 - 2026-06-11
 
 The plugin release. The monolithic `StateMachine` is gone from the public API. The core
