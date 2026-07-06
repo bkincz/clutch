@@ -189,6 +189,37 @@ Coordination methods only reach machines that have the matching plugin installed
 
 The machine map is fixed at creation. There is no `register`/`unregister`.
 
+## Micro frontends
+
+Independently deployed apps sharing one page need to share state without sharing builds. `sharedMachine` creates a machine once per page and returns the same instance to every caller of the same key, no matter which bundle the call comes from:
+
+```typescript
+import { createMachine, persist, sharedMachine } from '@bkincz/clutch'
+
+export const playerMachine = sharedMachine('app:player', () =>
+  createMachine<PlayerState>({ initialState }).with(persist<PlayerState>({ key: 'player' })),
+)
+```
+
+Each app keeps its own copy of this module, and they all end up on one machine. The registry lives on `globalThis` and instances are used structurally, so it works even when apps bundle separate copies of clutch. The React hooks take it from there: `useSlice(playerMachine, s => s.track)`.
+
+With Module Federation, share clutch as a singleton so only one copy loads:
+
+```jsonc
+// the shared option of your federation plugin, or "shared" in spool.json
+"shared": ["react", "react-dom", "@bkincz/clutch", "@bkincz/clutch/react"]
+```
+
+Independent deployments can drift: one team ships a new state shape while another app is still built against the old one. Declare a contract version and clutch warns at runtime when two apps disagree on it, naming the key and both versions. Mismatched clutch versions across bundles get the same warning.
+
+```typescript
+sharedMachine('app:player', factory, { contract: 2 })
+```
+
+For micro frontends in separate iframes or tabs there is no shared page to share an instance on; use the `sync` plugin instead, whose BroadcastChannel transport keeps same-origin machines in step.
+
+See it live: [Resonate](https://spool-demo-shell.pages.dev), a music UI where the browse view, search, and player bar are separately deployed apps sharing one player machine. Built with [spool](https://github.com/bkincz/spool).
+
 ## React
 
 Hooks live in `@bkincz/clutch/react`. The main entry stays React-free.
