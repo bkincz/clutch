@@ -102,4 +102,29 @@ describe('plugins/validate', () => {
 
 		expect(onError).not.toHaveBeenCalled()
 	})
+
+	it('uses a returned string as the rejection message', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			validate<TestState>(state => (state.count >= 0 ? true : 'count must not go negative'))
+		)
+
+		expect(() =>
+			machine.mutate(draft => {
+				draft.count = -1
+			})
+		).toThrow('count must not go negative')
+		expect(machine.getState().count).toBe(0)
+	})
+
+	it('keeps the generic message for a plain false', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			validate<TestState>(state => state.count >= 0)
+		)
+
+		expect(() =>
+			machine.mutate(draft => {
+				draft.count = -1
+			})
+		).toThrow('State validation failed')
+	})
 })

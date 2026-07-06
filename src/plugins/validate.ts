@@ -6,7 +6,8 @@ import { MachineError, type Plugin, type PluginContext } from '../core'
 /*
  *   TYPES
  ***************************************************************************************************/
-export type StateValidator<T> = (state: T) => boolean
+/** Return true to accept, false to reject, or a string to reject with that message. */
+export type StateValidator<T> = (state: T) => boolean | string
 
 const VALIDATE_SOURCE = 'validate'
 
@@ -28,21 +29,28 @@ export function validate<T extends object>(validator: StateValidator<T>): Plugin
 		},
 
 		onBeforeCommit(payload) {
-			if (!validator(payload.state)) {
+			const result = validator(payload.state)
+			if (typeof result === 'string') {
+				throw new MachineError(result || 'State validation failed', 'VALIDATION_ERROR')
+			}
+			if (!result) {
 				throw new MachineError('State validation failed', 'VALIDATION_ERROR')
 			}
 		},
 
 		onExternalState(state, meta) {
-			if (!validator(state)) {
-				ctx?.emitError(
-					new MachineError(
-						`State validation failed for external update from "${meta.source}"`,
-						'VALIDATION_ERROR'
-					),
-					'validate'
-				)
+			const result = validator(state)
+			if (typeof result !== 'string' && result) {
+				return
 			}
+			const detail = typeof result === 'string' && result ? `: ${result}` : ''
+			ctx?.emitError(
+				new MachineError(
+					`State validation failed for external update from "${meta.source}"${detail}`,
+					'VALIDATION_ERROR'
+				),
+				'validate'
+			)
 		},
 
 		onDestroy() {

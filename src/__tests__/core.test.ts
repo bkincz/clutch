@@ -63,6 +63,17 @@ describe('core Machine', () => {
 		expect(onCommit.mock.calls[0]?.[0].patches.length).toBe(2)
 	})
 
+	it('accepts a single recipe in batch', () => {
+		const machine = createMachine({ initialState: initialState() }).with(history<TestState>())
+		machine.batch(draft => {
+			draft.count = 3
+		}, 'set count')
+
+		expect(machine.getState().count).toBe(3)
+		expect(machine.undo()).toBe(true)
+		expect(machine.getState().count).toBe(0)
+	})
+
 	it('rejects an invalid initial state', () => {
 		expect(() => createMachine({ initialState: null as unknown as TestState })).toThrow(
 			MachineError
@@ -235,6 +246,145 @@ describe('core Machine', () => {
 			expect(order).toEqual(['second:7', 'first'])
 			expect(() => machine.getState()).toThrow('destroyed')
 			expect(() => machine.with({ name: 'late' })).toThrow('destroyed')
+		})
+	})
+
+	describe('set', () => {
+		it('shallow-merges and notifies', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.set({ count: 5, name: 'merged' })
+
+			expect(machine.getState()).toEqual({ count: 5, name: 'merged' })
+			expect(listener).toHaveBeenCalledTimes(1)
+		})
+
+		it('is a no-op when nothing changed', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.set({ count: 0, name: 'test' })
+			expect(listener).not.toHaveBeenCalled()
+		})
+
+		it('commits per-key patches that history can undo', () => {
+			const machine = createMachine({ initialState: initialState() }).with(
+				history<TestState>()
+			)
+
+			machine.set({ count: 1 })
+			machine.set({ count: 2, name: 'later' })
+
+			expect(machine.undo()).toBe(true)
+			expect(machine.getState()).toEqual({ count: 1, name: 'test' })
+			expect(machine.undo()).toBe(true)
+			expect(machine.getState()).toEqual(initialState())
+			expect(machine.redo()).toBe(true)
+			expect(machine.getState().count).toBe(1)
+		})
+
+		it('freezes the result like mutate does', () => {
+			const machine = createMachine({ initialState: { items: [] as number[] } })
+			machine.set({ items: [1, 2] })
+
+			expect(Object.isFrozen(machine.getState())).toBe(true)
+			expect(Object.isFrozen(machine.getState().items)).toBe(true)
+		})
+
+		it('rejects a non-object partial', () => {
+			const machine = createMachine({ initialState: initialState() })
+			expect(() => machine.set(null as never)).toThrow('Partial state must be an object')
+		})
+	})
+
+	describe('selector subscriptions', () => {
+		it('fires only when the selected value changes, with the previous value', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(state => state.count, listener)
+
+			machine.set({ name: 'other' })
+			expect(listener).not.toHaveBeenCalled()
+
+			machine.set({ count: 2 })
+			expect(listener).toHaveBeenCalledTimes(1)
+			expect(listener).toHaveBeenCalledWith(2, 0)
+		})
+
+		it('respects a custom equality function', () => {
+			const machine = createMachine({ initialState: { items: [] as number[] } })
+			const listener = vi.fn()
+			machine.subscribe(
+				state => state.items,
+				listener,
+				(a, b) => a.length === b.length
+			)
+
+			machine.mutate(draft => {
+				draft.items = [9]
+			})
+			expect(listener).toHaveBeenCalledTimes(1)
+
+			machine.mutate(draft => {
+				draft.items = [8]
+			})
+			expect(listener).toHaveBeenCalledTimes(1)
+		})
+
+		it('stops firing after unsubscribe', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			const unsubscribe = machine.subscribe(state => state.count, listener)
+
+			unsubscribe()
+			machine.set({ count: 9 })
+			expect(listener).not.toHaveBeenCalled()
+		})
+	})
+
+	describe('without plugins', () => {
+		it('still commits and notifies', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.mutate(draft => {
+				draft.count++
+			})
+			expect(machine.getState().count).toBe(1)
+			expect(listener).toHaveBeenCalledTimes(1)
+		})
+
+		it('skips notification when a recipe changes nothing', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.mutate(() => {})
+			expect(listener).not.toHaveBeenCalled()
+		})
+
+		it('runs batch with a single recipe', () => {
+			const machine = createMachine({ initialState: initialState() })
+			machine.batch(draft => {
+				draft.count = 7
+			})
+			expect(machine.getState().count).toBe(7)
+		})
+	})
+
+	describe('initial state', () => {
+		it('freezes the passed object so reset cannot be corrupted', () => {
+			const passed = initialState()
+			const machine = createMachine({ initialState: passed })
+
+			expect(Object.isFrozen(passed)).toBe(true)
+			machine.set({ count: 9 })
+			machine.reset()
+			expect(machine.getState().count).toBe(0)
 		})
 	})
 })
