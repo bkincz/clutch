@@ -6,7 +6,6 @@ import { MachineError, type Plugin, type PluginContext } from '../core'
 /*
  *   TYPES
  ***************************************************************************************************/
-/** Return true to accept, false to reject, or a string to reject with that message. */
 export type StateValidator<T> = (state: T) => boolean | string
 
 const VALIDATE_SOURCE = 'validate'

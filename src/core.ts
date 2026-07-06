@@ -3,8 +3,6 @@
  ***************************************************************************************************/
 import { produce, enablePatches, applyPatches, freeze, type Patch, type Draft } from 'immer'
 
-// Enabled by the first Machine, not at import time, so pulling clutch into a
-// bundle never flips a global immer switch for code that shares immer.
 let patchesEnabled = false
 const ensurePatches = (): void => {
 	if (!patchesEnabled) {
@@ -102,8 +100,6 @@ export class Machine<T extends object> {
 
 		ensurePatches()
 
-		// Frozen so nobody can mutate the object they passed in and silently
-		// corrupt what reset() returns to.
 		this.state = freeze(config.initialState, true)
 		this.initialState = this.state
 
@@ -206,8 +202,6 @@ export class Machine<T extends object> {
 			throw new MachineError('Recipe must be a function', 'VALIDATION_ERROR')
 		}
 
-		// Nothing consumes patches on a plugin-less machine, so skip immer's
-		// patch tracking and the commit payload entirely.
 		if (this.plugins.length === 0) {
 			const nextState = produce(this.state, recipe)
 			if (nextState === this.state) {
@@ -350,8 +344,6 @@ export class Machine<T extends object> {
 		return this.initialState
 	}
 
-	// Runs as a full-state replace, so history clears and persist rewrites.
-	// Unlike v2, resets stay local: peers are not notified through sync.
 	public reset(): void {
 		this.assertNotDestroyed()
 		this.applyExternalState(this.initialState, {
