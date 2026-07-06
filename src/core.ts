@@ -1,9 +1,17 @@
 /*
  *   IMPORTS
  ***************************************************************************************************/
-import { produce, enablePatches, applyPatches, type Patch, type Draft } from 'immer'
+import { produce, enablePatches, applyPatches, freeze, type Patch, type Draft } from 'immer'
 
-enablePatches()
+// Enabled by the first Machine, not at import time, so pulling clutch into a
+// bundle never flips a global immer switch for code that shares immer.
+let patchesEnabled = false
+const ensurePatches = (): void => {
+	if (!patchesEnabled) {
+		enablePatches()
+		patchesEnabled = true
+	}
+}
 
 /*
  *   ERROR TYPES
@@ -21,7 +29,7 @@ export class MachineError extends Error {
 /*
  *   TYPES
  ***************************************************************************************************/
-export type CommitOperation = 'mutate' | 'batch'
+export type CommitOperation = 'mutate' | 'batch' | 'set'
 
 export interface CommitPayload<T> {
 	state: T
@@ -92,8 +100,12 @@ export class Machine<T extends object> {
 			throw new MachineError('Initial state must be an object', 'VALIDATION_ERROR')
 		}
 
-		this.state = config.initialState
-		this.initialState = config.initialState
+		ensurePatches()
+
+		// Frozen so nobody can mutate the object they passed in and silently
+		// corrupt what reset() returns to.
+		this.state = freeze(config.initialState, true)
+		this.initialState = this.state
 
 		this.ctx = {
 			getState: () => this.getState(),
@@ -146,17 +158,44 @@ export class Machine<T extends object> {
 		return this.state
 	}
 
-	public subscribe(listener: (state: T) => void): () => void {
+	public subscribe(listener: (state: T) => void): () => void
+	public subscribe<S>(
+		selector: (state: T) => S,
+		listener: (selected: S, previous: S) => void,
+		equalityFn?: (a: S, b: S) => boolean
+	): () => void
+	public subscribe<S>(
+		selectorOrListener: ((state: T) => void) | ((state: T) => S),
+		maybeListener?: (selected: S, previous: S) => void,
+		equalityFn: (a: S, b: S) => boolean = Object.is
+	): () => void {
 		this.assertNotDestroyed()
 
-		if (typeof listener !== 'function') {
+		if (typeof selectorOrListener !== 'function') {
 			throw new MachineError('Listener must be a function', 'VALIDATION_ERROR')
 		}
 
-		this.listeners.add(listener)
+		if (typeof maybeListener !== 'function') {
+			const listener = selectorOrListener as (state: T) => void
+			this.listeners.add(listener)
+			return () => {
+				this.listeners.delete(listener)
+			}
+		}
 
+		const selector = selectorOrListener as (state: T) => S
+		let current = selector(this.state)
+		const wrapped = (state: T): void => {
+			const next = selector(state)
+			if (!equalityFn(current, next)) {
+				const previous = current
+				current = next
+				maybeListener(next, previous)
+			}
+		}
+		this.listeners.add(wrapped)
 		return () => {
-			this.listeners.delete(listener)
+			this.listeners.delete(wrapped)
 		}
 	}
 
@@ -165,6 +204,18 @@ export class Machine<T extends object> {
 
 		if (typeof recipe !== 'function') {
 			throw new MachineError('Recipe must be a function', 'VALIDATION_ERROR')
+		}
+
+		// Nothing consumes patches on a plugin-less machine, so skip immer's
+		// patch tracking and the commit payload entirely.
+		if (this.plugins.length === 0) {
+			const nextState = produce(this.state, recipe)
+			if (nextState === this.state) {
+				return
+			}
+			this.state = nextState
+			this.notifyListeners()
+			return
 		}
 
 		let patches: Patch[] = []
@@ -182,14 +233,81 @@ export class Machine<T extends object> {
 		this.commit(nextState, patches, inversePatches, description, 'mutate')
 	}
 
-	public batch(mutations: Array<(draft: Draft<T>) => void>, description?: string): void {
+	// Shallow merge without immer. Patches are synthesized per changed key so
+	// plugins see a normal commit.
+	public set(partial: Partial<T>, description?: string): void {
 		this.assertNotDestroyed()
 
+		if (!partial || typeof partial !== 'object') {
+			throw new MachineError('Partial state must be an object', 'VALIDATION_ERROR')
+		}
+
+		const patches: Patch[] = []
+		const inversePatches: Patch[] = []
+
+		for (const key of Object.keys(partial)) {
+			const next = partial[key as keyof T] as T[keyof T]
+			const existing = this.state[key as keyof T]
+			if (Object.is(existing, next)) {
+				continue
+			}
+			if (key in this.state) {
+				patches.push({ op: 'replace', path: [key], value: next })
+				inversePatches.push({ op: 'replace', path: [key], value: existing })
+			} else {
+				patches.push({ op: 'add', path: [key], value: next })
+				inversePatches.push({ op: 'remove', path: [key] })
+			}
+		}
+
+		if (patches.length === 0) {
+			return
+		}
+
+		const nextState = freeze({ ...this.state, ...partial }, true)
+
+		if (this.plugins.length === 0) {
+			this.state = nextState
+			this.notifyListeners()
+			return
+		}
+
+		this.commit(nextState, patches, inversePatches, description, 'set')
+	}
+
+	public batch(
+		mutations: Array<(draft: Draft<T>) => void> | ((draft: Draft<T>) => void),
+		description?: string
+	): void {
+		this.assertNotDestroyed()
+
+		if (typeof mutations === 'function') {
+			mutations = [mutations]
+		}
+
 		if (!Array.isArray(mutations)) {
-			throw new MachineError('Mutations must be an array', 'VALIDATION_ERROR')
+			throw new MachineError('Mutations must be a function or an array', 'VALIDATION_ERROR')
 		}
 
 		if (mutations.length === 0) {
+			return
+		}
+
+		if (this.plugins.length === 0) {
+			const nextState = mutations.reduce((currentState, recipe, index) => {
+				if (typeof recipe !== 'function') {
+					throw new MachineError(
+						`Mutation at index ${index} must be a function`,
+						'VALIDATION_ERROR'
+					)
+				}
+				return produce(currentState, recipe)
+			}, this.state)
+			if (nextState === this.state) {
+				return
+			}
+			this.state = nextState
+			this.notifyListeners()
 			return
 		}
 

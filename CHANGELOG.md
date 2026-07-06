@@ -1,5 +1,41 @@
 # Changelog
 
+## 3.2.0 - 2026-07-06
+
+The performance and durability release.
+
+- **`machine.set(partial)`**: shallow merge without immer, roughly 7x faster
+  than `mutate` on hot paths. Patches are synthesized per changed key, so
+  history, persist, sync, and devtools treat it like any other commit.
+- **`persist` versioning**: `version` and `migrate(oldState, fromVersion)`
+  config. Persisted state from a different version migrates on hydrate, or is
+  discarded with a warning when no migration exists. Pre-versioning state
+  counts as version 0.
+- **Selector subscriptions**: `machine.subscribe(selector, listener,
+  equalityFn?)` fires with `(selected, previous)` only when the selection
+  changes. The single-listener form is unchanged.
+- **`batch` accepts a single recipe** as well as an array.
+- **`validate` can return a string** to reject with that message instead of
+  the generic one.
+- Machines without plugins skip immer patch generation, roughly doubling
+  `mutate` throughput for bare stores.
+- `enablePatches()` now runs when the first machine is created instead of at
+  import time, so importing clutch no longer flips a global immer switch.
+- The object passed as `initialState` is deep-frozen, so external mutation of
+  it can no longer corrupt what `reset()` restores.
+
+## 3.1.0 - 2026-07-06
+
+The micro-frontend release. Added `sharedMachine(key, factory, options?)`:
+creates a machine once per page and returns the same instance to every caller
+of the same key, no matter which bundle asks. Built for independently deployed
+apps sharing one page, like Module Federation remotes. The registry lives on
+`globalThis` and instances are used structurally, so it survives apps bundling
+separate copies of clutch. Pass `{ contract: n }` and clutch warns at runtime
+when two apps disagree on the state shape version; mismatched clutch versions
+across bundles are warned the same way. See the new "Micro frontends" section
+in the README.
+
 ## 3.0.0 - 2026-06-11
 
 The plugin release. The monolithic `StateMachine` is gone from the public API. The core
@@ -55,7 +91,7 @@ See the [migration guide](./docs/migration-v3.md).
 Minified + brotli, Immer included: core-only import 4.5 KB (was 9.8 KB in v2), full
 bundle 8.3 KB, React hooks 0.8 KB.
 
-## 2.0.0 — 2026-06-10
+## 2.0.0 - 2026-06-10
 
 Performance and simplicity pass. Several breaking changes. no deprecation shims, 
 just straight raw dogging this release.
@@ -111,7 +147,7 @@ just straight raw dogging this release.
 - immer removed from `peerDependencies` (kept as a regular dependency) no more risk
   of two immer copies in one app.
 
-## 1.4.0 — 2026-06-06
+## 1.4.0 - 2026-06-06
 
 I want the ability to sync via Websockets
 

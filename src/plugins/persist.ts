@@ -21,6 +21,7 @@ export interface PersistFilter<T> {
 export interface PersistedEnvelope<T> {
 	state: T
 	timestamp: number
+	version?: number
 }
 
 export interface PersistConfig<T> {
@@ -31,6 +32,13 @@ export interface PersistConfig<T> {
 	filter?: PersistFilter<T>
 	/** Wait for an explicit `hydrate()` call instead of hydrating on install. Useful for SSR. */
 	deferred?: boolean
+	/** Version of the persisted shape. Bump it when the shape changes. */
+	version?: number
+	/**
+	 * Upgrades state persisted under an older version. Without it, persisted
+	 * state from a different version is discarded instead of hydrated.
+	 */
+	migrate?: (persisted: Partial<T>, fromVersion: number) => Partial<T>
 }
 
 export interface PersistApi {
@@ -112,6 +120,9 @@ export function persist<T extends object>(config: PersistConfig<T>): Plugin<T, P
 				state: filterState(ctx.getState()),
 				timestamp: Date.now(),
 			}
+			if (config.version !== undefined) {
+				envelope.version = config.version
+			}
 
 			const serialized = JSON.stringify(envelope)
 
@@ -186,9 +197,23 @@ export function persist<T extends object>(config: PersistConfig<T>): Plugin<T, P
 				return null
 			}
 
+			let state = envelope.state
+			const persistedVersion = envelope.version ?? 0
+			const expectedVersion = config.version ?? 0
+
+			if (persistedVersion !== expectedVersion) {
+				if (!config.migrate) {
+					console.warn(
+						`[Clutch] Discarding "${config.key}": it was persisted as version ${persistedVersion}, this app expects ${expectedVersion} and no migrate() is configured.`
+					)
+					return null
+				}
+				state = config.migrate(state, persistedVersion)
+			}
+
 			return {
 				...baseState,
-				...envelope.state,
+				...state,
 			} as T
 		} catch {
 			// Corrupt persisted data falls back to current state

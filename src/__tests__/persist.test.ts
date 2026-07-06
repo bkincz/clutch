@@ -348,4 +348,59 @@ describe('plugins/persist', () => {
 			)
 		})
 	})
+
+	describe('versioning', () => {
+		const seedVersioned = (state: Partial<TestState>, version?: number): void => {
+			storage.store.set(KEY, JSON.stringify({ state, timestamp: Date.now(), version }))
+		}
+
+		it('writes the configured version into the envelope', () => {
+			const machine = createMachine({ initialState: initialState() }).with(
+				persist<TestState>({ key: KEY, storage, version: 2 })
+			)
+			machine.mutate(draft => {
+				draft.count = 1
+			})
+			machine.flush()
+
+			expect(readStored()).toMatchObject({ version: 2 })
+		})
+
+		it('migrates persisted state from an older version', () => {
+			seedVersioned({ count: 41 }, 1)
+			const migrate = vi.fn((old: Partial<TestState>) => ({
+				...old,
+				count: (old.count ?? 0) + 1,
+			}))
+
+			const machine = createMachine({ initialState: initialState() }).with(
+				persist<TestState>({ key: KEY, storage, version: 2, migrate })
+			)
+
+			expect(migrate).toHaveBeenCalledWith({ count: 41 }, 1)
+			expect(machine.getState().count).toBe(42)
+		})
+
+		it('discards mismatched state when no migrate is configured', () => {
+			const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+			seedVersioned({ count: 41 }, 1)
+
+			const machine = createMachine({ initialState: initialState() }).with(
+				persist<TestState>({ key: KEY, storage, version: 2 })
+			)
+
+			expect(machine.getState().count).toBe(0)
+			expect(warn).toHaveBeenCalledWith(expect.stringContaining('version 1'))
+			warn.mockRestore()
+		})
+
+		it('hydrates unversioned state as version 0', () => {
+			seedVersioned({ count: 41 })
+
+			const machine = createMachine({ initialState: initialState() }).with(
+				persist<TestState>({ key: KEY, storage })
+			)
+			expect(machine.getState().count).toBe(41)
+		})
+	})
 })

@@ -111,6 +111,41 @@ describe('plugins/sync', () => {
 		expect(update?.state).toBeUndefined()
 	})
 
+	it('accumulates patches from rapid mutations within the debounce window', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			sync<TestState>({ transport, mergeStrategy: 'patches' })
+		)
+
+		machine.mutate(draft => {
+			draft.count = 1
+		})
+		machine.mutate(draft => {
+			draft.name = 'updated'
+		})
+
+		vi.advanceTimersByTime(50)
+
+		const updates = transport.sent.filter(message => message.type === 'patches')
+		expect(updates).toHaveLength(1)
+		expect(updates[0]?.patches).toEqual([
+			{ op: 'replace', path: ['count'], value: 1 },
+			{ op: 'replace', path: ['name'], value: 'updated' },
+		])
+	})
+
+	it('flushes a pending broadcast on destroy instead of dropping it', () => {
+		const machine = setup()
+
+		machine.mutate(draft => {
+			draft.count = 5
+		})
+
+		machine.destroy()
+
+		const update = transport.sent.find(message => message.type === 'state_update')
+		expect(update).toMatchObject({ state: { count: 5, name: 'test' } })
+	})
+
 	it('applies a remote state update', () => {
 		const machine = setup()
 		const listener = vi.fn()
@@ -225,6 +260,84 @@ describe('plugins/sync', () => {
 
 		expect(machine.getState().count).toBe(0)
 		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+	})
+
+	it('accepts states that merely contain "__proto__" inside a string value', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 3, name: 'docs about __proto__ and constructor' },
+			})
+		)
+
+		expect(machine.getState()).toEqual({
+			count: 3,
+			name: 'docs about __proto__ and constructor',
+		})
+	})
+
+	it('rejects patches whose values carry dangerous keys', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'patches',
+				patches: [
+					{
+						op: 'replace',
+						path: ['name'],
+						value: JSON.parse('{"__proto__":{"polluted":true}}'),
+					},
+				],
+			})
+		)
+
+		expect(machine.getState().name).toBe('test')
+		expect(({} as Record<string, unknown>).polluted).toBeUndefined()
+	})
+
+	it('accepts messages within the clock-skew tolerance', () => {
+		const machine = setup()
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 7, name: 'slow-clock' },
+				timestamp: Date.now() - 2 * 60 * 1000,
+			})
+		)
+
+		expect(machine.getState().count).toBe(7)
+	})
+
+	it('ignores messages outside the configured clock-skew tolerance', () => {
+		const machine = createMachine({ initialState: initialState() }).with(
+			sync<TestState>({ transport, maxClockSkewMs: 1000 })
+		)
+
+		transport.receive(
+			remoteMessage({
+				type: 'state_update',
+				state: { count: 7, name: 'skewed' },
+				timestamp: Date.now() - 5000,
+			})
+		)
+
+		expect(machine.getState().count).toBe(0)
+	})
+
+	it('ignores non-versioned messages without a numeric timestamp', () => {
+		const machine = setup()
+
+		transport.receive({
+			type: 'state_update',
+			instanceId: 'remote-instance',
+			state: { count: 7, name: 'no-clock' },
+		})
+
+		expect(machine.getState().count).toBe(0)
 	})
 
 	describe('autoStart: false', () => {

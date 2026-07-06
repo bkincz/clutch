@@ -13,7 +13,6 @@ export interface WebSocketTransportConfig {
 	maxQueueSize?: number
 	getAuthToken?: () => string | Promise<string>
 	authMode?: 'query' | 'message'
-	// Console output is stripped from production builds, so use this
 	onError?: (error: unknown) => void
 }
 

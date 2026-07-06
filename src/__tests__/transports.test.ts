@@ -1,5 +1,4 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
-import { StateMachine } from '../machine'
 import { StateSyncManager } from '../sync'
 import { BroadcastChannelTransport } from '../transports/broadcast-channel'
 import type { SyncTransport } from '../transports/types'
@@ -7,12 +6,6 @@ import type { SyncTransport } from '../transports/types'
 interface TestState {
 	count: number
 	name: string
-}
-
-class TestMachine extends StateMachine<TestState> {
-	constructor(config: any) {
-		super(config)
-	}
 }
 
 /*
@@ -246,13 +239,13 @@ describe('StateSyncManager with injected transport', () => {
 		expect(applied).toHaveLength(0)
 	})
 
-	it('should reject messages with out-of-window timestamps', () => {
+	it('should reject messages outside the clock-skew tolerance', () => {
 		createManager()
 
 		transport.deliver(
 			remoteMessage({
 				type: 'state_update',
-				timestamp: Date.now() - 120000,
+				timestamp: Date.now() - 6 * 60 * 1000,
 				state: { count: 9, name: 'old' },
 			})
 		)
@@ -322,78 +315,5 @@ describe('StateSyncManager with injected transport', () => {
 		syncManager.destroy()
 
 		expect(transport.destroy).toHaveBeenCalled()
-	})
-})
-
-/*
- *   DEFERRED HYDRATION + SYNC ORDERING
- ***************************************************************************************************/
-describe('Deferred hydration sync ordering', () => {
-	beforeEach(() => {
-		localStorage.clear()
-		// @ts-ignore
-		global.BroadcastChannel = vi.fn(() => ({
-			postMessage: vi.fn(),
-			close: vi.fn(),
-			addEventListener: vi.fn(),
-		}))
-	})
-
-	afterEach(() => {
-		localStorage.clear()
-		// @ts-ignore
-		delete global.BroadcastChannel
-	})
-
-	it('should not start sync before hydrateFromPersisted when hydration is deferred', () => {
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			persistenceKey: 'deferred-sync-test',
-			deferredHydration: true,
-			enableSync: true,
-		})
-
-		// @ts-ignore
-		expect(global.BroadcastChannel).not.toHaveBeenCalled()
-
-		machine.hydrateFromPersisted()
-
-		// @ts-ignore
-		expect(global.BroadcastChannel).toHaveBeenCalled()
-	})
-
-	it('should start sync at construction when hydration is not deferred', () => {
-		new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			enableSync: true,
-		})
-
-		// @ts-ignore
-		expect(global.BroadcastChannel).toHaveBeenCalled()
-	})
-
-	it('should ignore remote updates delivered before hydration', () => {
-		const transport = createFakeTransport()
-		const machine = new TestMachine({
-			initialState: { count: 0, name: 'test' },
-			persistenceKey: 'deferred-remote-test',
-			deferredHydration: true,
-			enableSync: { transport },
-		})
-
-		// Sync not initialized yet: transport has no handler, delivery is a no-op
-		transport.deliver({
-			type: 'state_update',
-			instanceId: 'remote',
-			timestamp: Date.now(),
-			state: { count: 99, name: 'remote' },
-		})
-
-		expect(machine.getState().count).toBe(0)
-
-		machine.hydrateFromPersisted()
-
-		// Post-hydration, sync is live and a full-sync request was issued
-		expect(transport.sent.some(m => m.type === 'full_sync')).toBe(true)
 	})
 })

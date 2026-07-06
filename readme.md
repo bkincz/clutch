@@ -46,7 +46,19 @@ machine.getState() // { count: 1, todos: ['Learn Clutch'] }
 const unsubscribe = machine.subscribe(state => console.log(state))
 ```
 
-The core machine has `mutate`, `batch`, `getState`, `subscribe`, `reset`, and `destroy`. That is all. Features come from plugins.
+The core machine has `mutate`, `set`, `batch`, `getState`, `subscribe`, `reset`, and `destroy`. That is all. Features come from plugins.
+
+```typescript
+// Hot paths can skip immer entirely: set() shallow-merges at plain-object
+// speed and still feeds every plugin, so undo, persist, and sync keep working
+machine.set({ count: 2 })
+
+// Subscribe to a slice outside React; fires only when the selection changes
+machine.subscribe(
+  state => state.count,
+  (count, previous) => console.log(previous, '->', count),
+)
+```
 
 ## Plugins
 
@@ -94,11 +106,15 @@ machine.with(persist<AppState>({
   maxChars: 5 * 1024 * 1024,        // refuse to write larger payloads
   storage: customStorage,           // anything with getItem/setItem/removeItem
   filter: { exclude: ['draft'] },   // or { include: [...] } or { custom: state => ... }
+  version: 2,                       // bump when the persisted shape changes
+  migrate: (old, from) => upgrade(old, from),
   deferred: false,                  // see SSR below
 }))
 ```
 
 Adds `hydrate()`, `isHydrated()`, `flush()`, and `clearPersisted()`. State is loaded on install and written on a debounce after every change. `flush()` forces a pending write immediately. Writes also flush on `pagehide` and `destroy()`.
+
+**Versioning:** state persisted under a different `version` runs through `migrate(oldState, fromVersion)` before hydrating. Without a `migrate`, mismatched state is discarded with a warning instead of hydrating a shape your code no longer expects. State persisted before you added `version` counts as version 0.
 
 **SSR:** pass `deferred: true` to skip hydration on install, then call `hydrate()` on the client after mount (or use the `useHydration` React hook). Without a browser storage available the plugin is inert, so creating machines on the server is safe.
 
@@ -138,9 +154,14 @@ With deferred persistence, pass `autoStart: false` and call `startSync()` after 
 
 ```typescript
 machine.with(validate<AppState>(state => state.count >= 0))
+
+// Return a string to reject with a message instead of the generic one
+machine.with(validate<AppState>(state =>
+  state.count >= 0 ? true : `count went negative: ${state.count}`,
+))
 ```
 
-A failing validator makes `mutate` and `batch` throw before any state is applied. Updates arriving from outside (sync, hydration) are already applied when plugins see them, so those are reported through `onError` instead of rejected.
+A failing validator makes `mutate`, `set`, and `batch` throw before any state is applied. Updates arriving from outside (sync, hydration) are already applied when plugins see them, so those are reported through `onError` instead of rejected.
 
 ### autosave
 
@@ -188,6 +209,56 @@ Coordination methods only reach machines that have the matching plugin installed
 | `destroyAll()` | every machine |
 
 The machine map is fixed at creation. There is no `register`/`unregister`.
+
+## Performance
+
+Reads are free: `getState()` returns the current reference, and `useSlice` only re-renders when the selected value changes. Writes go through immer, which buys draft ergonomics and patch-based plugins at a proxy cost. Measured on a small object (Node, ops/second):
+
+| Operation | ops/s |
+|---|---|
+| `set()` | ~3,000,000 |
+| `set()` with history recording | ~1,500,000 |
+| `mutate()` without plugins | ~840,000 |
+| `mutate()` with plugins | ~400,000 |
+
+All of these are orders of magnitude past what a UI needs; a 60fps interaction writes hundreds of times per second, not thousands. For the places that do write in tight loops, in order of preference:
+
+- Use `set()` for shallow updates on hot paths (drag handlers, per-frame values). It skips immer, synthesizes patches per changed key, and every plugin still works.
+- Keep large collections as keyed objects rather than long arrays. Immer proxies what you touch; indexing into a big array touches more than you think.
+- One `mutate` recipe that does five things beats five recipes. `batch` runs one produce per recipe.
+
+Machines without plugins skip patch generation automatically.
+
+## Micro frontends
+
+Independently deployed apps sharing one page need to share state without sharing builds. `sharedMachine` creates a machine once per page and returns the same instance to every caller of the same key, no matter which bundle the call comes from:
+
+```typescript
+import { createMachine, persist, sharedMachine } from '@bkincz/clutch'
+
+export const playerMachine = sharedMachine('app:player', () =>
+  createMachine<PlayerState>({ initialState }).with(persist<PlayerState>({ key: 'player' })),
+)
+```
+
+Each app keeps its own copy of this module, and they all end up on one machine. The registry lives on `globalThis` and instances are used structurally, so it works even when apps bundle separate copies of clutch. The React hooks take it from there: `useSlice(playerMachine, s => s.track)`.
+
+With Module Federation, share clutch as a singleton so only one copy loads:
+
+```jsonc
+// the shared option of your federation plugin, or "shared" in spool.json
+"shared": ["react", "react-dom", "@bkincz/clutch", "@bkincz/clutch/react"]
+```
+
+Independent deployments can drift: one team ships a new state shape while another app is still built against the old one. Declare a contract version and clutch warns at runtime when two apps disagree on it, naming the key and both versions. Mismatched clutch versions across bundles get the same warning.
+
+```typescript
+sharedMachine('app:player', factory, { contract: 2 })
+```
+
+For micro frontends in separate iframes or tabs there is no shared page to share an instance on; use the `sync` plugin instead, whose BroadcastChannel transport keeps same-origin machines in step.
+
+See it live: [Resonate](https://spool-demo-shell.pages.dev), a music UI where the browse view, search, and player bar are separately deployed apps sharing one player machine. Built with [spool](https://github.com/bkincz/spool).
 
 ## React
 
@@ -257,21 +328,7 @@ Plugin names must be unique per machine, and extension keys must not collide wit
 
 ## Migrating from v2
 
-`createV2Machine` accepts a v2 config and assembles the matching plugins, so most code only changes one import:
-
-```typescript
-import { createV2Machine } from '@bkincz/clutch'
-
-const machine = createV2Machine({
-  initialState,
-  persistenceKey: 'app',
-  maxHistorySize: 50,
-  enableDevTools: true,
-  saveToServer: state => api.put('/state', state),  // replaces subclassing
-})
-```
-
-Details, the full option-to-plugin mapping, and behavior changes are in the [migration guide](./docs/migration-v3.md).
+The v2 API and the `createV2Machine` bridge were removed in 3.0.0. The option-to-plugin mapping is in the [migration guide](./docs/migration-v3.md).
 
 ## TypeScript
 
@@ -285,14 +342,16 @@ machine.undo()      // ok
 machine.hydrate()   // compile error, persist is not installed
 ```
 
+To name the type of a plugin-extended machine, build it in a function and use `ReturnType<typeof build>`.
+
 ## Bundle Size
 
 Sizes are minified and brotli compressed, including Immer.
 
 | Import | Size |
 |---|---|
-| `{ createMachine }` only | ~4.5 KB |
-| Everything | ~8.4 KB |
+| `{ createMachine }` only | ~4.8 KB |
+| Everything | ~9.1 KB |
 | React hooks (`/react`) | ~0.8 KB |
 | WebSocket transport (`/sync-ws`) | ~1.1 KB |
 

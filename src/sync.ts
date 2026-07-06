@@ -14,6 +14,7 @@ export interface SyncConfig {
 	ignoreLocalChanges?: boolean
 	mergeStrategy?: 'latest' | 'patches'
 	transport?: SyncTransport
+	maxClockSkewMs?: number
 }
 
 type NormalizedSyncConfig = Required<Omit<SyncConfig, 'transport'>> & {
@@ -34,14 +35,36 @@ type SyncMessage<T> = {
 }
 
 /*
+ *   CONSTANTS
+ ***************************************************************************************************/
+const DEFAULT_MAX_CLOCK_SKEW_MS = 5 * 60 * 1000
+
+/*
  *   UTILITY FUNCTION
  ***************************************************************************************************/
-function debounce<T extends (...args: any[]) => void>(func: T, wait: number): T {
-	let timeout: ReturnType<typeof setTimeout>
-	return ((...args: Parameters<T>) => {
-		clearTimeout(timeout)
-		timeout = setTimeout(() => func(...args), wait)
-	}) as T
+function containsDangerousKeys(root: unknown): boolean {
+	const stack: unknown[] = [root]
+	const seen = new WeakSet<object>()
+
+	while (stack.length > 0) {
+		const value = stack.pop()
+		if (!value || typeof value !== 'object') {
+			continue
+		}
+		if (seen.has(value)) {
+			continue
+		}
+		seen.add(value)
+
+		for (const key of Object.keys(value)) {
+			if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+				return true
+			}
+			stack.push((value as Record<string, unknown>)[key])
+		}
+	}
+
+	return false
 }
 
 /*
@@ -54,7 +77,11 @@ export class StateSyncManager<T extends object> {
 	private lastSyncTimestamp = 0
 	private lastVersion: number | null = null
 	private resyncPending = false
-	private debouncedSync: (message: SyncMessage<T>) => void
+	private syncTimer: ReturnType<typeof setTimeout> | null = null
+	private pendingState: T | null = null
+	private pendingPatches: Patch[] = []
+	private pendingInversePatches: Patch[] = []
+	private pendingDescription: string | undefined
 
 	constructor(
 		config: SyncConfig,
@@ -63,7 +90,6 @@ export class StateSyncManager<T extends object> {
 	) {
 		this.instanceId = `instance_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`
 		this.config = this.normalizeConfig(config)
-		this.debouncedSync = debounce(msg => this.send(msg), this.config.syncDebounce)
 		this.transport =
 			this.config.transport ?? new BroadcastChannelTransport({ channel: this.config.channel })
 		this.initialize()
@@ -76,6 +102,7 @@ export class StateSyncManager<T extends object> {
 			ignoreLocalChanges: config.ignoreLocalChanges ?? false,
 			mergeStrategy: config.mergeStrategy || 'latest',
 			transport: config.transport,
+			maxClockSkewMs: config.maxClockSkewMs ?? DEFAULT_MAX_CLOCK_SKEW_MS,
 		}
 	}
 
@@ -112,17 +139,51 @@ export class StateSyncManager<T extends object> {
 			return
 		}
 
-		const message: SyncMessage<T> = {
-			type: this.config.mergeStrategy === 'patches' ? 'patches' : 'state_update',
-			instanceId: this.instanceId,
-			timestamp: Date.now(),
-			state: this.config.mergeStrategy === 'latest' ? state : undefined,
-			patches: this.config.mergeStrategy === 'patches' ? patches : undefined,
-			inversePatches: this.config.mergeStrategy === 'patches' ? inversePatches : undefined,
-			description,
+		if (this.config.mergeStrategy === 'patches') {
+			this.pendingPatches.push(...patches)
+			this.pendingInversePatches.unshift(...inversePatches)
+		} else {
+			this.pendingState = state
+		}
+		this.pendingDescription = description ?? this.pendingDescription
+
+		this.scheduleFlush()
+	}
+
+	private scheduleFlush(): void {
+		if (this.syncTimer) {
+			clearTimeout(this.syncTimer)
 		}
 
-		this.debouncedSync(message)
+		this.syncTimer = setTimeout(() => {
+			this.syncTimer = null
+			this.flushPending()
+		}, this.config.syncDebounce)
+	}
+
+	private flushPending(): void {
+		const isPatches = this.config.mergeStrategy === 'patches'
+
+		if (isPatches ? this.pendingPatches.length === 0 : this.pendingState === null) {
+			return
+		}
+
+		const message: SyncMessage<T> = {
+			type: isPatches ? 'patches' : 'state_update',
+			instanceId: this.instanceId,
+			timestamp: Date.now(),
+			state: isPatches ? undefined : (this.pendingState as T),
+			patches: isPatches ? this.pendingPatches : undefined,
+			inversePatches: isPatches ? this.pendingInversePatches : undefined,
+			description: this.pendingDescription,
+		}
+
+		this.pendingState = null
+		this.pendingPatches = []
+		this.pendingInversePatches = []
+		this.pendingDescription = undefined
+
+		this.send(message)
 	}
 
 	private handleMessage(message: SyncMessage<T>): void {
@@ -149,9 +210,15 @@ export class StateSyncManager<T extends object> {
 			return
 		}
 
-		const now = Date.now()
-		if (message.timestamp > now + 5000 || message.timestamp < now - 60000) {
-			console.error('[Clutch Sync] Invalid timestamp, possible attack')
+		if (typeof message.timestamp !== 'number' || !Number.isFinite(message.timestamp)) {
+			console.warn('[Clutch Sync] Ignoring message without a valid timestamp')
+			return
+		}
+
+		if (Math.abs(message.timestamp - Date.now()) > this.config.maxClockSkewMs) {
+			console.warn(
+				'[Clutch Sync] Ignoring message outside clock-skew tolerance. If peers run on devices with skewed clocks, raise maxClockSkewMs.'
+			)
 			return
 		}
 
@@ -205,19 +272,8 @@ export class StateSyncManager<T extends object> {
 							return false
 						}
 
-						const stateStr = JSON.stringify(message.state)
-						if (stateStr.includes('__proto__') || stateStr.includes('"constructor"')) {
-							console.error(
-								'[Clutch Sync] Potential prototype pollution detected in state'
-							)
-							return false
-						}
-
-						if (
-							Object.prototype.hasOwnProperty.call(message.state, '__proto__') ||
-							Object.prototype.hasOwnProperty.call(message.state, 'constructor')
-						) {
-							console.error('[Clutch Sync] Detected dangerous properties in state')
+						if (containsDangerousKeys(message.state)) {
+							console.error('[Clutch Sync] Dangerous keys in remote state, rejected')
 							return false
 						}
 
@@ -253,6 +309,13 @@ export class StateSyncManager<T extends object> {
 									console.error('[Clutch Sync] Dangerous property in patch path')
 									return false
 								}
+							}
+
+							if ('value' in patch && containsDangerousKeys(patch.value)) {
+								console.error(
+									'[Clutch Sync] Dangerous keys in patch value, rejected'
+								)
+								return false
 							}
 						}
 
@@ -316,6 +379,14 @@ export class StateSyncManager<T extends object> {
 	}
 
 	public destroy(): void {
+		if (this.syncTimer) {
+			clearTimeout(this.syncTimer)
+			this.syncTimer = null
+		}
+
+		// Send what's still buffered so peers don't lose the final change
+		this.flushPending()
+
 		this.transport.destroy()
 	}
 }

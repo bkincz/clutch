@@ -28,10 +28,10 @@ describe('Package Exports', () => {
 			expect(main.autosave).toBeDefined()
 		})
 
-		it('exports the v2 compat bridge', async () => {
+		it('does NOT export the removed v2 compat bridge', async () => {
 			const main = await import('../index')
 
-			expect(main.createV2Machine).toBeDefined()
+			expect((main as Record<string, unknown>).createV2Machine).toBeUndefined()
 		})
 
 		it('exports the BroadcastChannelTransport', async () => {

@@ -153,6 +153,28 @@ describe('plugins/devtools', () => {
 			expect(mockConnection.send).not.toHaveBeenCalled()
 		})
 
+		it('applies the last computed state from IMPORT_STATE', () => {
+			const machine = createMachine({ initialState: initialState() }).with(
+				devtools<TestState>()
+			)
+
+			dispatch({
+				type: 'DISPATCH',
+				payload: {
+					type: 'IMPORT_STATE',
+					nextLiftedState: {
+						computedStates: [
+							{ state: { count: 1, name: 'test' } },
+							{ state: { count: 2, name: 'test' } },
+							{ state: { count: 3, name: 'imported' } },
+						],
+					},
+				},
+			})
+
+			expect(machine.getState()).toEqual({ count: 3, name: 'imported' })
+		})
+
 		it('rejects prototype pollution in time-travel payloads', () => {
 			const machine = createMachine({ initialState: initialState() }).with(
 				devtools<TestState>()
@@ -192,5 +214,24 @@ describe('plugins/devtools', () => {
 
 		expect(machine.getState().count).toBe(1)
 		expect(mockExtension.connect).not.toHaveBeenCalled()
+	})
+
+	it('stays inert in a non-browser environment', () => {
+		vi.stubGlobal('window', undefined)
+
+		try {
+			const machine = createMachine({ initialState: initialState() }).with(
+				devtools<TestState>()
+			)
+
+			machine.mutate(draft => {
+				draft.count = 1
+			})
+
+			expect(machine.getState().count).toBe(1)
+			expect(mockExtension.connect).not.toHaveBeenCalled()
+		} finally {
+			vi.unstubAllGlobals()
+		}
 	})
 })

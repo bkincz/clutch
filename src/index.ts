@@ -3,7 +3,7 @@
  ***************************************************************************************************/
 export { Machine, createMachine, MachineError } from './core'
 export { Registry, createRegistry } from './registry'
-export { createV2Machine } from './compat'
+export { sharedMachine } from './shared'
 export { BroadcastChannelTransport } from './transports/broadcast-channel'
 
 export type {
@@ -17,7 +17,7 @@ export type {
 } from './core'
 
 export type { MachineMap, RegistryState, RegistryListener } from './registry'
-export type { V2CompatConfig, V2Machine, V2LifecycleEvent, V2LifecyclePayloadMap } from './compat'
+export type { SharedMachineOptions } from './shared'
 
 /*
  *   PLUGINS
