@@ -14,6 +14,7 @@ interface SharedEntry {
 	machine: unknown
 	clutchVersion: string
 	contract: number | string | undefined
+	version: number | undefined
 }
 
 const build = () => createMachine<PlayerState>({ initialState: { track: null, playing: false } })
@@ -62,6 +63,7 @@ describe('sharedMachine', () => {
 				machine: foreign,
 				clutchVersion: CLUTCH_VERSION,
 				contract: undefined,
+				version: undefined,
 			},
 		}
 
@@ -71,7 +73,12 @@ describe('sharedMachine', () => {
 	it('warns when the registering copy of clutch is a different version', () => {
 		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 		;(globalThis as { [REGISTRY_KEY]?: Record<string, SharedEntry> })[REGISTRY_KEY] = {
-			'app:player': { machine: build(), clutchVersion: '0.0.1', contract: undefined },
+			'app:player': {
+				machine: build(),
+				clutchVersion: '0.0.1',
+				contract: undefined,
+				version: undefined,
+			},
 		}
 
 		sharedMachine('app:player', build)
@@ -115,5 +122,98 @@ describe('sharedMachine', () => {
 			Object.assign(build(), { customMethod: () => 42 })
 		)
 		expect(again.customMethod()).toBe(42)
+	})
+
+	/*
+	 *   VERSION + MIGRATION
+	 ***************************************************************************************************/
+	interface PlayerStateV2 extends PlayerState {
+		volume: number
+	}
+	const buildV2 = () =>
+		createMachine<PlayerStateV2>({ initialState: { track: null, playing: false, volume: 1 } })
+
+	it('migrates the shared state up in place when a newer version joins', () => {
+		const v1 = sharedMachine('app:player', build, { version: 1 })
+		v1.mutate(draft => {
+			draft.track = 'neon-skyline'
+			draft.playing = true
+		})
+		const seen = vi.fn()
+		v1.subscribe(seen)
+
+		const v2 = sharedMachine('app:player', buildV2, {
+			version: 2,
+			migrate: prev => ({ ...(prev as PlayerState), volume: 0.5 }),
+		})
+
+		// Same instance: the newcomer gets the original machine, not a fresh one.
+		expect(v2).toBe(v1 as unknown as typeof v2)
+		// The live state was migrated in place, so v1's own reference sees it.
+		expect(v1.getState()).toEqual({ track: 'neon-skyline', playing: true, volume: 0.5 })
+		expect(seen).toHaveBeenCalledWith(expect.objectContaining({ volume: 0.5 }))
+	})
+
+	it('warns and leaves state alone when a newer version has no migrate', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		const v1 = sharedMachine('app:player', build, { version: 1 })
+		v1.mutate(draft => {
+			draft.track = 'x'
+		})
+
+		sharedMachine('app:player', buildV2, { version: 2 })
+
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('no migrate()'))
+		expect(v1.getState()).toEqual({ track: 'x', playing: false })
+	})
+
+	it('warns when an older version joins state it cannot migrate down to', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		sharedMachine('app:player', buildV2, { version: 2 })
+		sharedMachine('app:player', build, { version: 1 })
+
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('cannot migrate down'))
+	})
+
+	it('stays quiet and shares the instance when versions match', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		const first = sharedMachine('app:player', build, { version: 2 })
+		const second = sharedMachine('app:player', build, { version: 2 })
+
+		expect(second).toBe(first)
+		expect(warn).not.toHaveBeenCalled()
+	})
+
+	it('skips migration when the shared entry is not a clutch machine', () => {
+		;(globalThis as { [REGISTRY_KEY]?: Record<string, SharedEntry> })[REGISTRY_KEY] = {
+			'app:player': {
+				machine: { notAMachine: true },
+				clutchVersion: CLUTCH_VERSION,
+				contract: undefined,
+				version: 1,
+			},
+		}
+
+		expect(() =>
+			sharedMachine('app:player', buildV2, { version: 2, migrate: prev => prev })
+		).not.toThrow()
+	})
+
+	it('keeps the shared state when migrate throws', () => {
+		const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+		const v1 = sharedMachine('app:player', build, { version: 1 })
+		v1.mutate(draft => {
+			draft.track = 'safe'
+		})
+
+		sharedMachine('app:player', buildV2, {
+			version: 2,
+			migrate: () => {
+				throw new Error('bad migration')
+			},
+		})
+
+		expect(warn).toHaveBeenCalledWith(expect.stringContaining('bad migration'))
+		expect(v1.getState()).toEqual({ track: 'safe', playing: false })
 	})
 })

@@ -352,6 +352,10 @@ export class Machine<T extends object> {
 		})
 	}
 
+	public replaceState(state: T, meta: ExternalStateMeta = { source: 'replace' }): void {
+		this.applyExternalState(state, meta)
+	}
+
 	/*
 	 * CLEANUP
 	 */
