@@ -194,6 +194,27 @@ describe('core Machine', () => {
 		})
 	})
 
+	describe('replaceState', () => {
+		it('swaps state in place, notifying subscribers and external-state plugins', () => {
+			const onExternalState = vi.fn()
+			const machine = createMachine({ initialState: initialState() }).with({
+				name: 'sync',
+				onExternalState,
+			})
+			const listener = vi.fn()
+			machine.subscribe(listener)
+
+			machine.replaceState({ count: 9, name: 'migrated' })
+
+			expect(machine.getState()).toEqual({ count: 9, name: 'migrated' })
+			expect(listener).toHaveBeenCalledWith({ count: 9, name: 'migrated' })
+			expect(onExternalState).toHaveBeenCalledWith(
+				{ count: 9, name: 'migrated' },
+				expect.objectContaining({ source: 'replace' })
+			)
+		})
+	})
+
 	describe('reset', () => {
 		it('returns to the initial state and notifies listeners', () => {
 			const machine = createMachine({ initialState: initialState() })
