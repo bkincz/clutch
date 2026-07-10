@@ -1,6 +1,6 @@
 {
   "name": "@bkincz/clutch",
-  "version": "3.3.0",
+  "version": "3.3.1",
   "description": "A TypeScript-first, plugin-based state management library built on Immer",
   "main": "./dist/index.js",
   "module": "./dist/index.mjs",

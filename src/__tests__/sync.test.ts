@@ -3,6 +3,7 @@ import type { Patch } from 'immer'
 import { createMachine, type PluginContext } from '../core'
 import { sync } from '../plugins/sync'
 import { history } from '../plugins/history'
+import type { StandardSchemaV1 } from '../plugins/standard-schema'
 import type { TransportStatus } from '../transports/types'
 
 interface TestState {
@@ -11,6 +12,19 @@ interface TestState {
 }
 
 const initialState = (): TestState => ({ count: 0, name: 'test' })
+
+const testStateSchema = (): StandardSchemaV1<TestState> => ({
+	'~standard': {
+		version: 1,
+		vendor: 'clutch-test',
+		validate: value => {
+			const state = value as TestState
+			return typeof state?.count === 'number' && typeof state?.name === 'string'
+				? { value: state }
+				: { issues: [{ message: 'expected { count: number, name: string }' }] }
+		},
+	},
+})
 
 type SyncMessage = {
 	type: 'state_update' | 'full_sync' | 'patches'
@@ -338,6 +352,67 @@ describe('plugins/sync', () => {
 		})
 
 		expect(machine.getState().count).toBe(0)
+	})
+
+	describe('schema guard', () => {
+		const schemaSetup = () => {
+			const onError = vi.fn()
+			const machine = createMachine({ initialState: initialState() })
+				.with({ name: 'errors', onError })
+				.with(sync<TestState>({ transport, schema: testStateSchema() }))
+			return { machine, onError }
+		}
+
+		it('applies a remote update that matches the schema', () => {
+			const { machine } = schemaSetup()
+
+			transport.receive(
+				remoteMessage({ type: 'state_update', state: { count: 5, name: 'ok' } })
+			)
+
+			expect(machine.getState()).toEqual({ count: 5, name: 'ok' })
+		})
+
+		it('drops a remote update that fails the schema and reports it', () => {
+			const { machine, onError } = schemaSetup()
+
+			transport.receive(
+				remoteMessage({
+					type: 'state_update',
+					state: { count: 'nope' } as unknown as TestState,
+				})
+			)
+
+			expect(machine.getState()).toEqual(initialState())
+			expect(onError).toHaveBeenCalledWith(
+				expect.objectContaining({ message: expect.stringContaining('failed the schema') }),
+				'sync'
+			)
+		})
+
+		it('drops a remote update when the schema validates asynchronously', () => {
+			const onError = vi.fn()
+			const asyncSchema: StandardSchemaV1<TestState> = {
+				'~standard': {
+					version: 1,
+					vendor: 'clutch-test',
+					validate: () => Promise.resolve({ value: initialState() }),
+				},
+			}
+			const machine = createMachine({ initialState: initialState() })
+				.with({ name: 'errors', onError })
+				.with(sync<TestState>({ transport, schema: asyncSchema }))
+
+			transport.receive(
+				remoteMessage({ type: 'state_update', state: { count: 9, name: 'y' } })
+			)
+
+			expect(machine.getState()).toEqual(initialState())
+			expect(onError).toHaveBeenCalledWith(
+				expect.objectContaining({ message: expect.stringContaining('Async schema') }),
+				'sync'
+			)
+		})
 	})
 
 	describe('autoStart: false', () => {
