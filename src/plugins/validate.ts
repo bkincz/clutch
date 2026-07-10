@@ -2,25 +2,14 @@
  *   IMPORTS
  ***************************************************************************************************/
 import { MachineError, type Plugin, type PluginContext } from '../core'
+import { checkSchema, isStandardSchema, type StandardSchemaV1 } from './standard-schema'
 
 /*
  *   TYPES
  ***************************************************************************************************/
 export type StateValidator<T> = (state: T) => boolean | string
 
-export interface StandardSchemaV1<Output = unknown> {
-	readonly '~standard': {
-		readonly version: 1
-		readonly vendor: string
-		readonly validate: (
-			value: unknown
-		) => StandardResult<Output> | Promise<StandardResult<Output>>
-	}
-}
-
-type StandardResult<Output> =
-	| { readonly value: Output; readonly issues?: undefined }
-	| { readonly issues: ReadonlyArray<{ readonly message: string }> }
+export type { StandardSchemaV1 }
 
 const VALIDATE_SOURCE = 'validate'
 
@@ -75,35 +64,12 @@ export function validate<T extends object>(
 /*
  *   HELPERS
  ***************************************************************************************************/
-function isStandardSchema<T>(value: unknown): value is StandardSchemaV1<T> {
-	return (
-		typeof value === 'object' &&
-		value !== null &&
-		'~standard' in value &&
-		typeof (value as StandardSchemaV1<T>)['~standard']?.validate === 'function'
-	)
-}
-
+/** Normalizes a Standard Schema into the predicate the plugin already speaks. */
 function toValidator<T extends object>(
 	validator: StateValidator<T> | StandardSchemaV1<T>
 ): StateValidator<T> {
 	if (isStandardSchema<T>(validator)) {
-		return state => {
-			const result = validator['~standard'].validate(state)
-			if (result instanceof Promise) {
-				throw new MachineError(
-					'Async schema validation is not supported; state commits are synchronous',
-					'VALIDATION_ERROR'
-				)
-			}
-			if (result.issues) {
-				return (
-					result.issues.map(issue => issue.message).join('; ') ||
-					'State validation failed'
-				)
-			}
-			return true
-		}
+		return state => checkSchema(validator, state)
 	}
 	if (typeof validator === 'function') {
 		return validator
