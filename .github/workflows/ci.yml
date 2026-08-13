@@ -1,76 +1,168 @@
 name: CI
 
 on:
-  push:
-    branches: [master, main, develop]
-  pull_request:
-    branches: [master, main, develop]
+    push:
+        branches: [main]
+    pull_request:
+        branches: [main]
+
+permissions:
+    contents: read
 
 jobs:
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        node-version: [22, 24]
+    test:
+        name: Test
+        runs-on: ${{ matrix.os }}
+        strategy:
+            fail-fast: false
+            matrix:
+                os: [ubuntu-latest, windows-latest]
+                # 22 is the oldest supported line (engines: >=22.12.0).
+                node-version: [22, 24]
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+        steps:
+            # TODO: pin to commit SHAs, as release.yml is. Lower stakes here —
+            # no secrets are exposed to this workflow — but a mutable tag is
+            # still someone else's code running on every push.
+            - name: Checkout
+              uses: actions/checkout@v7
 
-      - name: Setup Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ matrix.node-version }}
-          cache: "npm"
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v6
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Setup Node.js ${{ matrix.node-version }}
+              uses: actions/setup-node@v6
+              with:
+                  node-version: ${{ matrix.node-version }}
+                  cache: 'pnpm'
 
-      - name: Type check
-        run: npm run type-check
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
 
-      - name: Lint
-        run: npm run lint
+            - name: Type check
+              run: pnpm run type-check
 
-      - name: Format check
-        run: npm run format:check
+            - name: Lint
+              run: pnpm run lint
 
-      - name: Test (with coverage)
-        run: npm run test:coverage
+            - name: Format check
+              run: pnpm run format:check
 
-      - name: Upload coverage to Codecov
-        if: matrix.node-version == 24
-        uses: codecov/codecov-action@v7
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage/lcov.info
-          fail_ci_if_error: false
+            # Coverage runs the whole suite; no separate test run needed.
+            - name: Test (with coverage)
+              run: pnpm run test:coverage
 
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    needs: test
+            - name: Upload coverage to Codecov
+              if: matrix.os == 'ubuntu-latest' && matrix.node-version == 24
+              uses: codecov/codecov-action@v7
+              with:
+                  token: ${{ secrets.CODECOV_TOKEN }}
+                  files: ./coverage/lcov.info
+                  fail_ci_if_error: false
 
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
+    build:
+        name: Build
+        runs-on: ubuntu-latest
+        needs: test
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: 22
-          cache: "npm"
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
 
-      - name: Install dependencies
-        run: npm ci
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v6
 
-      - name: Build
-        run: npm run build
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: 'pnpm'
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: dist
-          path: dist
-          retention-days: 7
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Build
+              run: pnpm run build
+
+            - name: Size limit
+              run: pnpm run size
+
+            - name: Upload build artifacts
+              uses: actions/upload-artifact@v7
+              with:
+                  name: dist
+                  path: dist
+                  retention-days: 7
+
+    smoke:
+        name: Smoke (pack + resolve exports)
+        runs-on: ubuntu-latest
+        needs: test
+
+        steps:
+            - name: Checkout
+              uses: actions/checkout@v7
+
+            - name: Setup pnpm
+              uses: pnpm/action-setup@v6
+
+            - name: Setup Node.js
+              uses: actions/setup-node@v6
+              with:
+                  node-version: 24
+                  cache: 'pnpm'
+
+            - name: Install dependencies
+              run: pnpm install --frozen-lockfile
+
+            - name: Build
+              run: pnpm run build
+
+            - name: Pack the tarball
+              run: pnpm pack --pack-destination "$RUNNER_TEMP"
+
+            - name: Install the tarball into a bare consumer
+              working-directory: ${{ runner.temp }}
+              run: |
+                  mkdir -p consumer && cd consumer
+                  npm init -y > /dev/null
+                  npm pkg set type=module
+                  npm install "$RUNNER_TEMP"/bkincz-clutch-*.tgz react react-dom
+
+            - name: Import every export, ESM and CJS
+              working-directory: ${{ runner.temp }}/consumer
+              run: |
+                  node --input-type=module -e '
+                    const { createMachine, createRegistry } = await import("@bkincz/clutch")
+                    await import("@bkincz/clutch/react")
+
+                    const machine = createMachine({ initialState: { count: 0 } })
+                    machine.mutate(draft => { draft.count += 1 }, "increment")
+                    if (machine.getState().count !== 1) {
+                      throw new Error("mutate did not apply: " + JSON.stringify(machine.getState()))
+                    }
+                    if (typeof createRegistry !== "function") throw new Error("no createRegistry")
+                  '
+                  node -e '
+                    const clutch = require("@bkincz/clutch")
+                    if (typeof clutch.createMachine !== "function") throw new Error("no createMachine from CJS")
+                    require("@bkincz/clutch/react")
+                  '
+
+            - name: Type-check against the tarball
+              working-directory: ${{ runner.temp }}/consumer
+              run: |
+                  npm install typescript@6 @types/react @types/node
+                  cat > index.ts <<'TS'
+                  import { createMachine, type Machine } from '@bkincz/clutch'
+                  import { useSlice, useMachine } from '@bkincz/clutch/react'
+
+                  interface Counter {
+                      count: number
+                  }
+
+                  const machine: Machine<Counter> = createMachine<Counter>({ initialState: { count: 0 } })
+
+                  export type Exports = [typeof machine.mutate, typeof useSlice, typeof useMachine]
+                  TS
+                  npx tsc --noEmit --strict --module nodenext --moduleResolution nodenext --target es2022 --jsx react-jsx index.ts

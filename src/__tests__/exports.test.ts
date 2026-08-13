@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { createMachine, validate, type MachineConfig, type StandardSchemaV1 } from '../index'
 
 describe('Package Exports', () => {
 	describe('Main entry', () => {
@@ -41,11 +42,25 @@ describe('Package Exports', () => {
 		})
 
 		it('exports core types', async () => {
-			const _typeTest: import('../index').MachineConfig<{ count: number }> = {
+			const _typeTest: MachineConfig<{ count: number }> = {
 				initialState: { count: 0 },
 			}
 
 			expect(_typeTest).toBeDefined()
+		})
+
+		it('exports the schema type plugins accept', () => {
+			const schema: StandardSchemaV1<{ count: number }> = {
+				'~standard': {
+					version: 1,
+					vendor: 'test',
+					validate: value => ({ value: value as { count: number } }),
+				},
+			}
+
+			const machine = createMachine({ initialState: { count: 0 } }).with(validate(schema))
+
+			expect(machine.getState().count).toBe(0)
 		})
 
 		it('does NOT export React hooks from the main entry', async () => {
@@ -70,6 +85,12 @@ describe('Package Exports', () => {
 			expect(react.useAutosave).toBeDefined()
 		})
 
+		it('exports the scope factory', async () => {
+			const react = await import('../react')
+
+			expect(react.createMachineScope).toBeDefined()
+		})
+
 		it('does NOT export core classes from the React entry', async () => {
 			const react = await import('../react')
 
@@ -77,10 +98,10 @@ describe('Package Exports', () => {
 			expect((react as Record<string, unknown>).Registry).toBeUndefined()
 		})
 
-		it('has exactly 8 hook exports', async () => {
+		it('has exactly 9 exports', async () => {
 			const react = await import('../react')
 
-			expect(Object.keys(react).length).toBe(8)
+			expect(Object.keys(react).length).toBe(9)
 		})
 	})
 

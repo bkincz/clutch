@@ -1,5 +1,80 @@
 # Changelog
 
+## 3.5.0 - Unreleased
+
+The React Compiler and server-rendering release. No API removals.
+
+### Added
+
+- **`createMachineScope(factory, name?)`** in `@bkincz/clutch/react`: returns a
+  `Provider` that creates one machine per mount and a `useScopedMachine` hook
+  that reads it. A module-level machine is one object per process, so on a
+  server every concurrent request renders against the same state; a scope gives
+  each render tree its own instance. This is separate from `persist`'s
+  `deferred` option, which only defers storage access.
+- The provider takes an optional `state` prop, merged in before the first
+  render so children never observe an empty store, and re-applied when it
+  changes by value. Rebuilding an equal object during a parent re-render does
+  not re-seed, so writes made in between survive.
+- **`ctx.notify()` on `PluginContext`.** Publishes a change a plugin exposes
+  through its own API without touching state, so plugin-backed hooks re-render
+  on flags that live outside the store.
+- **`StandardSchemaV1` is exported from the main entry.** `validate` and `sync`
+  have accepted a schema since 3.3, but the type was not importable, so nothing
+  wrapping either could be typed.
+
+### Fixed
+
+- **`forceSave()` now notifies subscribers.** `useAutosave().hasUnsavedChanges`
+  stayed `true` in the UI after a successful manual save, because clearing the
+  dirty flag published nothing.
+- **`loadFromServer()` clears the dirty flag before replacing state**, so a
+  subscriber woken by the replacement no longer reads the pre-load flag.
+- **`useSlice` and `useRegistrySlice` no longer keep a mirror of state in a
+  ref.** Both now run through `useSyncExternalStoreWithSelector`, which is what
+  React expects an external store to use and what the React Compiler can
+  verify. Same behavior for a stable selector; an inline selector that changes
+  identity every render is now re-run on read rather than serving the previous
+  value.
+- **`useHydration` and `useAutosave` read through `useSyncExternalStore`**
+  instead of copying plugin flags into local state from an effect.
+
+### Changed
+
+- **New runtime dependency: `use-sync-external-store`** (the official shim,
+  around 1 KB). Adds `useSyncExternalStoreWithSelector`, which React does not
+  export directly.
+- **`immer` is now `^11.1.16`**, up from an open `>=9.0.0`. The old range let a
+  consumer resolve immer 9 against a build tested on 11.
+- **Node 22.12 is the floor** (`engines`), and the toolchain moved to
+  TypeScript 6, ESLint 10, and vitest 4. Emitted output targets are unchanged.
+
+### Sizes
+
+Minified + brotli, dependencies included: core-only import 5.8 KB, full bundle
+10.7 KB, React hooks 2.0 KB, WebSocket sync 1.1 KB.
+
+## 3.3.1 - 2026-07-10
+
+- **Standard Schema moved out of `validate`** into its own module, so more than
+  one plugin can accept a schema.
+- **`sync({ schema })`.** A remote update that fails the schema is dropped and
+  reported through the machine's error channel instead of being applied. One
+  misconfigured tab can no longer poison every other tab's state.
+
+## 3.3.0 - 2026-07-10
+
+- **`validate` accepts a Standard Schema** (zod, valibot, arktype, anything
+  implementing the spec) in place of a predicate. Issues come back as the
+  rejection message.
+- **`sharedMachine({ version, migrate })`.** When apps on one page disagree on
+  the state shape, the higher version migrates the shared state in place
+  instead of only warning. Downgrades, missing `migrate`, and a throwing
+  `migrate` each warn and leave the state alone. `version` takes precedence
+  over `contract`, which can only report a mismatch.
+- **`machine.replaceState(state, meta?)`** is public, which is what makes an
+  external migration possible.
+
 ## 3.2.0 - 2026-07-06
 
 The performance and durability release.

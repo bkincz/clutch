@@ -52,6 +52,7 @@ export function autosave<T extends object>(config: AutosaveConfig<T>): Plugin<T,
 		try {
 			await config.save(ctx.getState())
 			dirty = false
+			ctx.notify()
 		} catch (error) {
 			const saveError = new MachineError(
 				`Force save failed: ${toError(error).message}`,
@@ -106,8 +107,8 @@ export function autosave<T extends object>(config: AutosaveConfig<T>): Plugin<T,
 				return false
 			}
 
-			ctx.replaceState(serverState, { source: AUTOSAVE_SOURCE, description: 'Server load' })
 			dirty = false
+			ctx.replaceState(serverState, { source: AUTOSAVE_SOURCE, description: 'Server load' })
 			return true
 		} catch (error) {
 			ctx.emitError(toError(error), 'persist')

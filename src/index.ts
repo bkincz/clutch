@@ -42,6 +42,7 @@ export type {
 export type { DevtoolsConfig } from './plugins/devtools'
 export type { SyncApi, SyncPluginConfig } from './plugins/sync'
 export type { StateValidator } from './plugins/validate'
+export type { StandardSchemaV1 } from './plugins/standard-schema'
 export type { AutosaveApi, AutosaveConfig } from './plugins/autosave'
 export type { SyncTransport, TransportStatus } from './transports/types'
 export type { BroadcastChannelTransportConfig } from './transports/broadcast-channel'

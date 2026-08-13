@@ -54,6 +54,8 @@ export interface PluginContext<T extends object> {
 	replaceState(state: T, meta: ExternalStateMeta): void
 	applyPatches(patches: Patch[], meta: Omit<ExternalStateMeta, 'patches'>): void
 	subscribe(listener: (state: T) => void): () => void
+	/** Publishes a change a plugin exposes through its own API, without touching state. */
+	notify(): void
 	emitError(error: Error, operation: string): void
 }
 
@@ -111,6 +113,7 @@ export class Machine<T extends object> {
 				this.applyExternalState(next, { ...meta, patches })
 			},
 			subscribe: listener => this.subscribe(listener),
+			notify: () => this.notifyListeners(),
 			emitError: (error, operation) => this.emitError(error, operation),
 		}
 	}
@@ -467,7 +470,6 @@ export class Machine<T extends object> {
 		}
 
 		if (!handled) {
-			// eslint-disable-next-line no-console
 			console.error(`[Machine] Unhandled plugin error during ${operation}`, error)
 		}
 	}

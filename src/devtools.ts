@@ -204,7 +204,7 @@ export class DevToolsConnector<T extends object> {
 		if (this.extension) {
 			try {
 				this.extension.unsubscribe()
-			} catch (error) {
+			} catch {
 				// Ignore unsubscribe errors
 			}
 			this.extension = null

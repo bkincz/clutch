@@ -289,8 +289,53 @@ function CountLabel() {
 | `useMachineHistory(machine)` | `history` plugin | history info plus `undo`, `redo`, `clearHistory` |
 | `useHydration(machine)` | `persist` plugin | `{ isHydrated }`, hydrates on mount |
 | `useAutosave(machine)` | `autosave` plugin | `save`, `load`, `isSaving`, `saveError`, `hasUnsavedChanges`, ... |
+| `createMachineScope(factory, name?)` | core | `{ Provider, useScopedMachine }`, one machine per provider |
 
 The plugin hooks require the plugin's methods on the machine type. Passing a machine without that plugin fails to compile.
+
+### Request-scoped machines
+
+A machine created at module scope is one object per process. In a browser that is
+what you want. On a server it means every concurrent request renders against the
+same instance, so one user's data can reach another user's render. It is not a
+persistence problem, so `deferred` does not help. The machine has to be built per
+render tree.
+
+`createMachineScope(factory, name?)` returns a `Provider` that builds one machine
+per mount, and a hook that reads it.
+
+```tsx
+import { createMachine } from '@bkincz/clutch'
+import { createMachineScope, useSlice } from '@bkincz/clutch/react'
+
+const { Provider: UserProvider, useScopedMachine: useUserMachine } = createMachineScope(
+  () => createMachine<UserState>({ initialState: { details: null } }),
+  'User'
+)
+
+// server component, userDetails differ per request
+export default async function Layout({ children }) {
+  const userDetails = await getUserDetails()
+  return <UserProvider state={{ details: userDetails }}>{children}</UserProvider>
+}
+
+// any client component below it
+function Greeting() {
+  const machine = useUserMachine()
+  const name = useSlice(machine, s => s.details?.name ?? '')
+  return <span>{name}</span>
+}
+```
+
+`state` is merged in before the first render, so children never see an empty
+store, and again whenever it changes by value. A parent re-render that rebuilds an
+equal object does not re-seed, so writes made in between survive.
+
+`name` sets the context display name and appears in the error thrown when the hook
+runs outside its provider.
+
+Reach for a scope only when the data belongs to a single request. Client-only
+state such as UI preferences is fine on a module-level machine.
 
 ## Writing a Plugin
 
@@ -346,13 +391,13 @@ To name the type of a plugin-extended machine, build it in a function and use `R
 
 ## Bundle Size
 
-Sizes are minified and brotli compressed, including Immer.
+Sizes are minified and brotli compressed, including dependencies.
 
 | Import | Size |
 |---|---|
-| `{ createMachine }` only | ~4.8 KB |
-| Everything | ~9.1 KB |
-| React hooks (`/react`) | ~0.8 KB |
+| `{ createMachine }` only | ~5.8 KB |
+| Everything | ~10.7 KB |
+| React hooks (`/react`) | ~2.0 KB |
 | WebSocket transport (`/sync-ws`) | ~1.1 KB |
 
 Plugins you do not import are tree-shaken away.

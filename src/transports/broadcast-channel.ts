@@ -53,7 +53,7 @@ export class BroadcastChannelTransport implements SyncTransport {
 		if (this.channel) {
 			try {
 				this.channel.close()
-			} catch (error) {
+			} catch {
 				// Ignore close errors
 			}
 			this.channel = null

@@ -89,7 +89,7 @@ export class WebSocketTransport implements SyncTransport {
 		if (this.socket) {
 			try {
 				this.socket.close()
-			} catch (error) {
+			} catch {
 				// Ignore close errors
 			}
 			this.socket = null
@@ -182,7 +182,7 @@ export class WebSocketTransport implements SyncTransport {
 		let message: unknown
 		try {
 			message = JSON.parse(String(data))
-		} catch (error) {
+		} catch {
 			return
 		}
 
@@ -267,7 +267,7 @@ export class WebSocketTransport implements SyncTransport {
 					this.reportError(new Error('WebSocket heartbeat timed out'))
 					try {
 						this.socket?.close()
-					} catch (error) {
+					} catch {
 						// Ignore close errors, handleClose drives reconnection anyway
 					}
 				}, timeout)
