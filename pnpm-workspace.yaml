@@ -1,2 +1,8 @@
 allowBuilds:
-  esbuild: true
+    esbuild: true
+
+overrides:
+    esbuild: '>=0.28.1'
+
+# 3 days, in minutes.
+minimumReleaseAge: 4320

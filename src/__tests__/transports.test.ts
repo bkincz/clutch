@@ -59,27 +59,30 @@ describe('BroadcastChannelTransport', () => {
 			}),
 		}
 
-		// @ts-ignore
-		global.BroadcastChannel = vi.fn(() => mockChannel)
+		// @ts-expect-error test double for a DOM global
+		// Constructed with new, so it cannot be an arrow.
+		globalThis.BroadcastChannel = vi.fn(function () {
+			return mockChannel
+		})
 	})
 
 	afterEach(() => {
-		// @ts-ignore
-		delete global.BroadcastChannel
+		// @ts-expect-error test double for a DOM global
+		delete globalThis.BroadcastChannel
 	})
 
 	it('should create a channel with the configured name', () => {
 		new BroadcastChannelTransport({ channel: 'custom-channel' })
 
-		// @ts-ignore
-		expect(global.BroadcastChannel).toHaveBeenCalledWith('custom-channel')
+		// @ts-expect-error test double for a DOM global
+		expect(globalThis.BroadcastChannel).toHaveBeenCalledWith('custom-channel')
 	})
 
 	it('should use the default channel name when none is given', () => {
 		new BroadcastChannelTransport()
 
-		// @ts-ignore
-		expect(global.BroadcastChannel).toHaveBeenCalledWith('clutch-state-sync')
+		// @ts-expect-error test double for a DOM global
+		expect(globalThis.BroadcastChannel).toHaveBeenCalledWith('clutch-state-sync')
 	})
 
 	it('should post messages on send', () => {
@@ -116,8 +119,8 @@ describe('BroadcastChannelTransport', () => {
 	})
 
 	it('should be inert when BroadcastChannel is unsupported', () => {
-		// @ts-ignore
-		delete global.BroadcastChannel
+		// @ts-expect-error test double for a DOM global
+		delete globalThis.BroadcastChannel
 
 		expect(() => {
 			const transport = new BroadcastChannelTransport()
@@ -168,14 +171,14 @@ describe('StateSyncManager with injected transport', () => {
 
 	it('should not construct a BroadcastChannel when a transport is injected', () => {
 		const spy = vi.fn()
-		// @ts-ignore
-		global.BroadcastChannel = spy
+		// @ts-expect-error test double for a DOM global
+		globalThis.BroadcastChannel = spy
 
 		createManager()
 
 		expect(spy).not.toHaveBeenCalled()
-		// @ts-ignore
-		delete global.BroadcastChannel
+		// @ts-expect-error test double for a DOM global
+		delete globalThis.BroadcastChannel
 	})
 
 	it('should request a full sync on initialization', () => {

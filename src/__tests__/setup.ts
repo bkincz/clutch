@@ -16,7 +16,7 @@ Object.defineProperty(window, 'localStorage', {
 	value: localStorageMock,
 })
 
-global.console = {
+globalThis.console = {
 	...console,
 	log: vi.fn(),
 	debug: vi.fn(),

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
 import { createMachine } from '../core'
 import { createRegistry } from '../registry'
 import { history } from '../plugins/history'
@@ -14,6 +15,7 @@ import {
 	useAutosave,
 	useRegistry,
 	useRegistrySlice,
+	createMachineScope,
 } from '../react'
 
 interface TestState {
@@ -89,6 +91,43 @@ describe('react', () => {
 			expect(result.current).toBe(7)
 		})
 
+		it('uses the latest selector when its identity changes every render', () => {
+			const machine = createMachine({ initialState: initialState() })
+			const { result, rerender } = renderHook(
+				({ key }: { key: 'count' | 'name' }) => useSlice(machine, state => state[key]),
+				{ initialProps: { key: 'count' as const } }
+			)
+
+			expect(result.current).toBe(0)
+
+			rerender({ key: 'name' as const })
+
+			expect(result.current).toBe('test')
+		})
+
+		it('suppresses re-renders through a custom equality function', () => {
+			const machine = createMachine({ initialState: initialState() })
+			let renders = 0
+
+			renderHook(() => {
+				renders++
+				return useSlice(
+					machine,
+					state => ({ count: state.count }),
+					(a, b) => a.count === b.count
+				)
+			})
+
+			const rendersBefore = renders
+
+			act(() => {
+				machine.mutate(draft => {
+					draft.name = 'changed'
+				})
+			})
+
+			expect(renders).toBe(rendersBefore)
+		})
 		it('does not re-render when an unrelated part of state changes', () => {
 			const machine = createMachine({ initialState: initialState() })
 			let renders = 0
@@ -313,6 +352,115 @@ describe('react', () => {
 
 			expect(machine.getState()).toEqual({ count: 99, name: 'server' })
 			expect(result.current.lastSaved).toBeInstanceOf(Date)
+		})
+	})
+
+	describe('createMachineScope', () => {
+		const scopeFactory = () => createMachine({ initialState: initialState() })
+
+		const wrapperFor =
+			(
+				Provider: ReturnType<typeof createMachineScope>['Provider'],
+				state?: Partial<TestState>
+			) =>
+			({ children }: { children: ReactNode }) =>
+				createElement(Provider, { state, children })
+
+		it('provides the machine created by the factory', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+			const { result } = renderHook(() => useScopedMachine(), {
+				wrapper: wrapperFor(Provider),
+			})
+
+			expect(result.current.getState()).toEqual({ count: 0, name: 'test' })
+		})
+
+		it('throws when the hook is used outside the provider', () => {
+			const { useScopedMachine } = createMachineScope(scopeFactory, 'User')
+			const onError = vi.spyOn(console, 'error').mockImplementation(() => {})
+
+			expect(() => renderHook(() => useScopedMachine())).toThrow(
+				/User scope was read outside/
+			)
+
+			onError.mockRestore()
+		})
+
+		// The reason the scope exists: a module-level machine would hand the
+		// same state to every concurrent render on a server.
+		it('creates an independent machine per provider', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+
+			const first = renderHook(() => useScopedMachine(), { wrapper: wrapperFor(Provider) })
+			const second = renderHook(() => useScopedMachine(), { wrapper: wrapperFor(Provider) })
+
+			expect(first.result.current).not.toBe(second.result.current)
+
+			act(() => {
+				first.result.current.set({ count: 42 })
+			})
+
+			expect(first.result.current.getState().count).toBe(42)
+			expect(second.result.current.getState().count).toBe(0)
+		})
+
+		it('seeds the machine before the first render', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+			const seen: number[] = []
+
+			renderHook(
+				() => {
+					const machine = useScopedMachine()
+					seen.push(machine.getState().count)
+					return machine
+				},
+				{ wrapper: wrapperFor(Provider, { count: 7 }) }
+			)
+
+			expect(seen[0]).toBe(7)
+		})
+
+		it('re-seeds when the state prop changes by value', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+			let seed: Partial<TestState> = { count: 1 }
+
+			const { result, rerender } = renderHook(() => useScopedMachine(), {
+				wrapper: ({ children }: { children: ReactNode }) =>
+					createElement(Provider, { state: seed, children }),
+			})
+
+			expect(result.current.getState().count).toBe(1)
+
+			seed = { count: 9 }
+			rerender()
+
+			expect(result.current.getState().count).toBe(9)
+		})
+
+		// A parent re-render usually rebuilds the prop object. Re-seeding on
+		// identity alone would revert anything the app wrote in between.
+		it('does not clobber local writes when an equal seed is rebuilt', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+			const { result, rerender } = renderHook(() => useScopedMachine(), {
+				wrapper: ({ children }: { children: ReactNode }) =>
+					createElement(Provider, { state: { count: 1 }, children }),
+			})
+
+			act(() => {
+				result.current.set({ count: 5 })
+			})
+			rerender()
+
+			expect(result.current.getState().count).toBe(5)
+		})
+
+		it('leaves the machine untouched when no state is given', () => {
+			const { Provider, useScopedMachine } = createMachineScope(scopeFactory)
+			const { result } = renderHook(() => useScopedMachine(), {
+				wrapper: wrapperFor(Provider),
+			})
+
+			expect(result.current.getState()).toEqual(initialState())
 		})
 	})
 })

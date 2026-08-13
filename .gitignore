@@ -5,9 +5,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# Lock files (keep only package-lock.json)
+# Lock files (pnpm-lock.yaml is committed)
 yarn.lock
-pnpm-lock.yaml
+package-lock.json
 
 # Build outputs
 dist/
